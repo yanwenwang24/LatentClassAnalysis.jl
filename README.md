@@ -52,4 +52,4 @@ assignments, probabilities = predict(best_model, data)
 
 ## Extended Example
 
-See [example.jl](examples/example.jl) for a comprehensive example including:
+See [example.jl](examples/example.jl) for a comprehensive example.
