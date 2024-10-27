@@ -1,5 +1,8 @@
 # LatentClassAnalysis.jl
 
+[![Build status (Github Actions)](https://github.com/yanwenwang24/LatentClassAnalysis.jl/workflows/CI/badge.svg)](https://github.com/yanwenwang24/LatentClassAnalysis.jl/actions)
+[![codecov.io](http://codecov.io/github/yanwenwang24/LatentClassAnalysis.jl/coverage.svg?branch=main)](http://codecov.io/github/yanwenwang24/LatentClassAnalysis.jl?branch=main)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A Julia package for Latent Class Analysis (LCA)
 
