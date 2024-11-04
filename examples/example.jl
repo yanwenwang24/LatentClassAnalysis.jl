@@ -13,7 +13,7 @@ true_classes = rand(1:2, n_samples)
 # Different response patterns for each class
 function generate_response(class)
     if class == 1
-        return rand() < 0.8 ? 1 : 2  # High probability of 1
+        return rand() < 0.8 ? 2 : 3  # High probability of 1
     else
         return rand() < 0.3 ? 1 : 2  # Low probability of 1
     end
