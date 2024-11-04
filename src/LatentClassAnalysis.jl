@@ -3,6 +3,7 @@ module LatentClassAnalysis
 using CategoricalArrays
 using DataFrames
 using Distributions
+using Printf
 using LinearAlgebra
 using Random
 using Statistics
@@ -12,7 +13,8 @@ export LCAModel,
        fit!, 
        predict, 
        prepare_data,
-       diagnostics!
+       diagnostics!,
+       show_profiles
 
 include("types.jl")
 include("utils.jl")
