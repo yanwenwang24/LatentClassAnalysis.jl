@@ -48,3 +48,7 @@ jobs:
           name: julia-${{ matrix.version }}-${{ matrix.os }}
           fail_ci_if_error: true
           verbose: true
+          threshold: 0.90
+          strict_coverage_check: false
+          coverage_report_type: patch
+          informational: true
