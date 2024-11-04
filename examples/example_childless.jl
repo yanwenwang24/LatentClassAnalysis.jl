@@ -4,6 +4,12 @@ using DataFrames, DataFramesMeta
 using LatentClassAnalysis
 using Random
 
+```
+This example replicated the article:
+Wang, Yanwen, Bussarawan Teerawichitchainan, and Christine Ho. 2024. 
+“Diverse Pathways to Permanent Childlessness in Singapore: A Latent Class Analysis.” 
+Advances in Life Course Research 61:100628. doi: 10.1016/j.alcr.2024.100628.
+```
 Random.seed!(1024)
 
 # Load dataset
