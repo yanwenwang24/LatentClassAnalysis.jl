@@ -4,7 +4,7 @@ using DataFrames, DataFramesMeta
 using LatentClassAnalysis
 using Random
 
-Random.seed!(123)
+Random.seed!(1024)
 
 # Load dataset
 df = DataFrame(Arrow.Table("examples/childless_df.arrow"))
@@ -12,9 +12,17 @@ df = DataFrame(Arrow.Table("examples/childless_df.arrow"))
 # Step 1: Data Preparation
 data, n_categories = prepare_data(
     df,
-    :age_fmarry, :marry_end, :infertility,
-    :edu,
-    :ocp20s, :ocp30s, :flexible, :familyleave
+    # Indicators for the partnership domain during respondents' 20s and 30s
+    :age_fmarry, # marriage timing ("no", "early", "norm", "late")
+    :marry_end, # whether marriage dissolved (0/1)
+    :infertility, # whether infertility is reported (0/1)
+    # Indicators for the education domain
+    :edu, # education level ("low", "medium", "high")
+    # Indicators for the occupational domain during respondents' 20s and 30s
+    :ocp20s, # occupation in 20s ("Unemployed", "Blue-collared", "Semi-professional", "Professional")
+    :ocp30s, # ... in 30s
+    :flexible, # whether flexible work arrangements are available (0/1)
+    :familyleave # whether generous family leave is available (0/1)
 )
 
 # Step 2: Model Selection - Try different numbers of classes
