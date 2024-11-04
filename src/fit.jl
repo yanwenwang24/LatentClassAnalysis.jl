@@ -41,8 +41,10 @@ function fit!(
     for j in 1:n_items
         valid_range = 1:model.n_categories[j]
         if !all(x -> x in valid_range, view(data, :, j))
+            min_val, max_val = extrema(view(data, :, j))
             throw(ArgumentError(
-                "Invalid category in column $j. Expected values in $valid_range"
+                "Invalid category in column $j. Expected values in $valid_range, " *
+                "but got values in $min_val:$max_val. Data should be 1-based."
             ))
         end
     end
