@@ -81,7 +81,7 @@ assignments, probabilities = predict(best_model, data)
 ## Extended Example
 
 See [example.jl](examples/example.jl) for an example with simulated data.
-See [example_childless.jl](examples/example_childless_jl) for an example with real-world data on childlessness, 
+See [example_childless.jl](examples/example_childless.jl) for an example with real-world data on childlessness, 
 replicating this research:
 - Wang, Yanwen, Bussarawan Teerawichitchainan, and Christine Ho. 2024. “Diverse Pathways to Permanent Childlessness in Singapore: A Latent Class Analysis.” Advances in Life Course Research 61:100628. doi: 10.1016/j.alcr.2024.100628.
 
