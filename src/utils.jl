@@ -75,11 +75,11 @@ function check_identifiability(n_items::Int, n_classes::Int, n_categories::Vecto
     required_items = 2 * ceil(Int, log(min_cat, n_classes)) + 1
     
     if n_items < required_items
-        throw(ArgumentError(
+        @warn(
             "Model may not be identifiable. " *
             "With $n_classes classes and minimum of $min_cat categories, " *
-            "need at least $required_items items (got $n_items). "
-        ))
+            "need ideally $required_items items (got $n_items)."
+        )
     end
     return true
 end
