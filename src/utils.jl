@@ -67,6 +67,24 @@ function prepare_data(
 end
 
 """
+Check model identifiability
+"""
+function check_identifiability(n_items::Int, n_classes::Int, n_categories::Vector{Int})
+    # Use minimum categories as worst case bound
+    min_cat = minimum(n_categories)
+    required_items = 2 * ceil(Int, log(min_cat, n_classes)) + 1
+    
+    if n_items < required_items
+        throw(ArgumentError(
+            "Model may not be identifiable. " *
+            "With $n_classes classes and minimum of $min_cat categories, " *
+            "need at least $required_items items (got $n_items). "
+        ))
+    end
+    return true
+end
+
+"""
     diagnostics!(model::LCAModel, data::Matrix{Int}, ll::Float64)
 
 Calculate model fit statistics including AIC, BIC, SBIC, and entropy.
