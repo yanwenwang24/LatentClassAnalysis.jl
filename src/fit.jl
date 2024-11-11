@@ -25,18 +25,6 @@ function fit!(
         throw(ArgumentError("Number of items in data ($n_items) doesn't match model ($(model.n_items))"))
     end
 
-    # Check minimum sample size: at least 5 observations per parameter
-    n_params = (model.n_classes - 1) +
-               sum(cats -> (model.n_classes * (cats - 1)), model.n_categories)
-    min_samples = 5 * n_params
-
-    if n_obs < min_samples
-        throw(ArgumentError(
-            "Insufficient data: need at least $min_samples observations " *
-            "(5 × $n_params parameters), but got $n_obs"
-        ))
-    end
-
     # Validate data values
     for j in 1:n_items
         valid_range = 1:model.n_categories[j]
