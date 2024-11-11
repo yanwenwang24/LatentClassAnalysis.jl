@@ -17,7 +17,7 @@ mutable struct LCAModel
     n_categories::Vector{Int}
     class_probs::Vector{Float64}
     item_probs::Vector{Matrix{Float64}}
-    
+
     function LCAModel(n_classes::Int, n_items::Int, n_categories::Vector{Int})
         # Validate number of classes, items, and categories
         if n_classes < 2
@@ -34,14 +34,16 @@ mutable struct LCAModel
                 throw(ArgumentError("Each item must have ≥ 2 categories, item $i has $cats"))
             end
         end
+        # Check identifiability
+        check_identifiability(n_items, n_classes, n_categories)
 
-        class_probs = fill(1/n_classes, n_classes)
+        class_probs = fill(1 / n_classes, n_classes)
         item_probs = [rand(n_classes, cats) for cats in n_categories]
         # Normalize probabilities
         for probs in item_probs
             probs ./= sum(probs, dims=2)
         end
-        
+
         new(n_classes, n_items, n_categories, class_probs, item_probs)
     end
 end
