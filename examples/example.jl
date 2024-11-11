@@ -24,11 +24,12 @@ df = DataFrame(
     item1 = [generate_response(c) for c in true_classes],
     item2 = [generate_response(c) for c in true_classes],
     item3 = [generate_response(c) for c in true_classes],
-    item4 = categorical([rand(["Yes", "No"]) for _ in 1:n_samples])
+    item4 = categorical([rand(["Yes", "No"]) for _ in 1:n_samples]),
+    item5 = categorical([rand(["Yes", "No"]) for _ in 1:n_samples])
 )
 
 # Step 1: Data Preparation
-data, n_categories = prepare_data(df, :item1, :item2, :item3, :item4)
+data, n_categories = prepare_data(df, :item1, :item2, :item3, :item4, :item5)
 
 # Step 2: Model Selection - Try different numbers of classes
 results = []
