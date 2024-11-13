@@ -76,6 +76,11 @@ using Statistics
         model = LCAModel(2, n_items, fill(2, n_items))
         ll = fit!(model, data)
 
+        # Test warning for number of observations
+        @test_logs (:warn, "Low number of observations (100) may affect model fitting. Consider using more data for better results.") begin
+            fit!(model, data)
+        end
+
         # Test results
         @test !isnan(ll)
         @test !isinf(ll)
