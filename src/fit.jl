@@ -25,6 +25,11 @@ function fit!(
         throw(ArgumentError("Number of items in data ($n_items) doesn't match model ($(model.n_items))"))
     end
 
+    if n_obs < 300
+        @warn("Low number of observations ($n_obs) may affect model fitting. " *
+              "Consider using more data for better results.")
+    end
+
     # Validate data values
     for j in 1:n_items
         valid_range = 1:model.n_categories[j]
