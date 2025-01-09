@@ -1,14 +1,14 @@
 """
-    fit!(model::LCAModel, data::Matrix{Int}; 
-         max_iter::Int=1000, tol::Float64=1e-6, verbose::Bool=false)
+    fit!(model::LCAModel, data::AbstractMatrix{<:Integer}; 
+         max_iter::Integer=1000, tol::Real=1e-6, verbose::Bool=false)
 
 Fit the LCA model using EM algorithm.
 
 # Arguments
 - `model::LCAModel`: Model to fit
-- `data::Matrix{Int}`: Prepared data matrix
-- `max_iter::Int=1000`: Maximum number of iterations
-- `tol::Float64=1e-6`: Convergence tolerance
+- `data::AbstractMatrix{<:Integer}`: Prepared data matrix
+- `max_iter::Integer=1000`: Maximum number of iterations
+- `tol::Real=1e-6`: Convergence tolerance
 - `verbose::Bool=false`: Whether to print progress
 
 # Returns
@@ -16,8 +16,8 @@ Fit the LCA model using EM algorithm.
 """
 
 function fit!(
-    model::LCAModel, data::Matrix{Int};
-    max_iter::Int=10000, tol::Float64=1e-6, verbose::Bool=false
+    model::LCAModel, data::AbstractMatrix{<:Integer};
+    max_iter::Integer=10000, tol::Real=1e-6, verbose::Bool=false
 )
     # Validate data dimensions
     n_obs, n_items = size(data)

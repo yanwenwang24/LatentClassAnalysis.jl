@@ -18,7 +18,7 @@ mutable struct LCAModel
     class_probs::Vector{Float64}
     item_probs::Vector{Matrix{Float64}}
 
-    function LCAModel(n_classes::Int, n_items::Int, n_categories::Vector{Int})
+    function LCAModel(n_classes::Integer, n_items::Integer, n_categories::AbstractVector{<:Integer})
         # Validate number of classes, items, and categories
         if n_classes < 2
             throw(ArgumentError("Number of classes must be ≥ 2, got $n_classes"))

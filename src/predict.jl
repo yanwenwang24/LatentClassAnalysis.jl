@@ -1,11 +1,11 @@
 """
-    predict(model::LCAModel, data::Matrix{Int})
+    predict(model::LCAModel, data::AbstractMatrix{<:Integer})
 
 Predict class memberships for new data.
 
 # Arguments
 - `model::LCAModel`: Fitted model
-- `data::Matrix{Int}`: New data matrix
+- `data::AbstractMatrix{<:Integer}`: New data matrix
 
 # Returns
 - `Vector{Int}`: Predicted class assignments
@@ -13,7 +13,7 @@ Predict class memberships for new data.
 """
 
 function predict(
-    model::LCAModel, data::Matrix{Int}
+    model::LCAModel, data::AbstractMatrix{<:Integer}
 )
     n_obs = size(data, 1)
     posterior = zeros(n_obs, model.n_classes)
