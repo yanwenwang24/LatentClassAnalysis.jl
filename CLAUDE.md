@@ -17,7 +17,7 @@ Research, doi 10.1016/j.alcr.2024.100628).
 - `src/covariates.jl` latent class regression: `_standardize` (covariates standardized
   internally, `A` maps coefficients back to the raw scale), the E-step log-prior hook, the
   damped Newton M-step `_update_coefs!` on `Q(β)`, and `_class_prior` (raw-scale
-  membership probabilities used by `fit`, `predict` and, later, `simulate`).
+  membership probabilities used by `fit`, `predict` and `simulate`).
 - `src/restarts.jl` random starts, two-stage multi-start driver, `_sort_by_size!`,
   `_init_split`.
 - `src/fit.jl` `StatsAPI.fit` methods, `check_identifiability`, fit flags, erroring `fit!`.
@@ -25,9 +25,13 @@ Research, doi 10.1016/j.alcr.2024.100628).
   free-parameter vector: class block, then item logits against each row's modal
   category), `_pack`/`_unpack!`, the analytic `_score!`, the finite-difference
   `_observed_information`, `coef`/`coefnames`/`vcov`/`stderror`/`confint`/`coeftable`/
-  `informationmatrix`, and the delta-method `profiles`. `src/bootstrap.jl` stubs (later). `src/diagnostics.jl` StatsAPI accessors,
-  criteria, `entropy`, `diagnostics`, Tables interface. `src/show.jl` `show`,
-  `show_profiles`. `src/deprecated.jl` 0.2 shims, included last.
+  `informationmatrix`, and the delta-method `profiles`. `src/bootstrap.jl` `simulate`
+  (`_simulate` also returns the classes), label alignment of replicate fits
+  (`_align_labels`, `_align!`), `bootstrap` with the `LCABootstrap` methods of
+  `vcov`/`stderror`/`confint`/`coeftable`/`profiles`, `bootstrap_lrt`, `pvalue`.
+  `src/diagnostics.jl` StatsAPI accessors, criteria, `entropy`, `diagnostics`, Tables
+  interface. `src/show.jl` `show` (all types), `show_profiles`. `src/deprecated.jl` 0.2
+  shims, included last.
 - `test/` one file per concern, included from `runtests.jl`; `testutils.jl` has the
   simulation, class-alignment and `same_fit` helpers and the shared two-/three-class designs.
 - `docs/` Documenter site (`make.jl`, `src/*.md`, `src/refs.bib`). `docs/src/changelog.md`
@@ -57,11 +61,16 @@ julia --project=examples examples/example_childless.jl
 - `prepare_data` always yields dense codes `1..C_j` per item (`0` = missing), ordered by
   `DataAPI.levels` (level order for categorical columns, sorted values otherwise); the
   labels are stored in `LCAData.item_levels` and `show_profiles`/`profiles` read them.
-- The bootstrap is unfinished in 0.3.0: its exported functions exist (docstrings say
-  "not available in this version") and throw. Covariates and standard errors are done:
-  `LCAParams.coefs` lives on the standardized scale (column 1 zero), `LCAModel.beta` on
-  the raw scale (`P × (K - 1)`); `LCAModel.vcov` is on the public `coef` scale
-  (raw covariates), with `NaN` rows/columns for boundary parameters.
+- Scales: `LCAParams.coefs` lives on the standardized covariate scale (column 1 zero),
+  `LCAModel.beta` on the raw scale (`P × (K - 1)`); `LCAModel.vcov` and
+  `LCABootstrap.coefs` are on the public `coef` scale (raw covariates), with `NaN`
+  rows/columns for boundary parameters in `vcov`.
+- Bootstrap conventions: seeds are drawn from `rng` up front and every replicate runs on
+  its own `Xoshiro(seed)` (serial and threaded runs agree bitwise); replicate fits run
+  under a `NullLogger` with one aggregated warning afterwards; a replicate is aligned to
+  the reference model with `_align_labels` (`_permute_classes!` re-bases β) and packed
+  with the reference model's `ParamLayout`, never its own argmax; bootstrap/BLRT
+  simulate complete data and re-apply the observed missingness mask.
 - Every user-visible change gets a line under `[Unreleased]` in `CHANGELOG.md`.
 - Compat entries use caret ranges (`"1.10"` means `>= 1.10, < 2`). Do not add a compat
   entry for `LatentClassAnalysis` in `docs/Project.toml` or `examples/Project.toml`.

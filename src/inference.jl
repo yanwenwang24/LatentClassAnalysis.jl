@@ -521,6 +521,12 @@ function _zquantile(level::Real)
     return Distributions.quantile(Distributions.Normal(), 1 - (1 - level) / 2)
 end
 
+# "95" for level 0.95, "99.9" for 0.999: the confidence level as a percentage string.
+function _level_string(level::Real)
+    pct = 100 * level
+    return isinteger(pct) ? string(Int(pct)) : string(pct)
+end
+
 """
     coeftable(m::LCAModel; level=0.95, which=:all) -> StatsBase.CoefTable
 
@@ -546,8 +552,7 @@ function StatsAPI.coeftable(m::LCAModel; level::Real=0.95, which::Symbol=:all)
     idx = which === :all ? (1:length(c)) : which === :class ? (1:n_class) : (n_class + 1:length(c))
     z = c[idx] ./ se[idx]
     p = 2 .* Distributions.ccdf.(Distributions.Normal(), abs.(z))
-    pct = 100 * level
-    pctstr = isinteger(pct) ? string(Int(pct)) : string(pct)
+    pctstr = _level_string(level)
     return StatsBase.CoefTable(
         [c[idx], se[idx], z, p, ci[idx, 1], ci[idx, 2]],
         ["Estimate", "Std. Error", "z", "Pr(>|z|)", "Lower $pctstr%", "Upper $pctstr%"],

@@ -8,9 +8,18 @@ All notable changes to this project are documented in this file. The format foll
 
 ### 0.3.0 (breaking; in development on branch `v0.3.0`)
 
-Still to come in 0.3.0: `simulate`, `bootstrap`, `bootstrap_lrt`.
-
 #### Added
+- Simulation and bootstrap: `simulate(m, n; rng, X, missing_mask)` draws data sets from
+  a fitted model (with its covariates and, optionally, a missingness pattern);
+  `bootstrap(m; n_boot, parametric, n_starts, multithreaded)` refits the model to
+  resampled rows or simulated data, aligns the class labels of every replicate to the
+  model, and returns an `LCABootstrap` with `vcov`, `stderror`, `confint(; method)`
+  (percentile or normal), `coeftable` and `profiles` (percentile intervals of the
+  replicate probabilities, including class sizes of covariate models); `bootstrap_lrt`
+  is the parametric bootstrap likelihood-ratio test of `K` against `K + 1` classes
+  (McLachlan 1987; Nylund et al. 2007) with `pvalue`, a `BootstrapLRT` result, and a
+  convenience form `bootstrap_lrt(d, k)` that fits both models. Replicates are seeded up
+  front, so serial and `multithreaded=true` runs agree bitwise.
 - Standard errors and confidence intervals: `fit` computes the covariance matrix of the
   free parameters from the observed information matrix (analytic score, finite-difference
   Hessian) unless `se=:none`. `coef`/`coefnames` give the parameters on the logit scale
@@ -69,7 +78,8 @@ Still to come in 0.3.0: `simulate`, `bootstrap`, `bootstrap_lrt`.
   and is checked before the M-step, so the reported log-likelihood, posterior and
   parameters are consistent.
 - Dependencies: DataFrames and CategoricalArrays are no longer dependencies (Tables.jl and
-  DataAPI.jl are used instead); StatsAPI, StatsBase, Tables and DataAPI were added.
+  DataAPI.jl are used instead); StatsAPI, StatsBase, Tables, DataAPI and the Logging
+  standard library were added.
 
 #### Deprecated
 - `prepare_data(df, cols::Symbol...)` (returns the 0.2 tuple), `diagnostics!(m, data, ll)`

@@ -1,12 +1,13 @@
 module LatentClassAnalysis
 
-using LinearAlgebra   # Newton step and information matrix (later phases)
+using LinearAlgebra
+import Logging
 using Printf
 using Random
 using Tables
 import DataAPI
 import Distributions
-import Statistics: mean   # covariate-averaged class sizes (later phase)
+import Statistics: mean, cov, median, quantile, std
 import StatsAPI
 import StatsAPI: fit, fit!, predict, loglikelihood, nobs, dof, aic, bic, aicc, coef,
     coefnames, vcov, stderror, confint, coeftable, informationmatrix, isfitted, pvalue

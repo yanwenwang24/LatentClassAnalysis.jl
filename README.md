@@ -38,8 +38,9 @@ Research 61:100628, [doi:10.1016/j.alcr.2024.100628](https://doi.org/10.1016/j.a
   confidence intervals from the observed information matrix (`coeftable`, and the
   `se`/`lower`/`upper` columns of `profiles`)
 
-Coming in the 0.3.0 release (see [CHANGELOG.md](CHANGELOG.md)): a bootstrap
-likelihood-ratio test for the number of classes.
+- Simulation from a fitted model (`simulate`), bootstrap standard errors and percentile
+  intervals (`bootstrap`), and the bootstrap likelihood-ratio test for the number of
+  classes (`bootstrap_lrt`)
 
 ## Installation
 

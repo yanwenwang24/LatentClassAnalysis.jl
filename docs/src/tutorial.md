@@ -219,6 +219,70 @@ cheap = fit(LCAModel, d, 4; rng = StableRNG(1), n_starts = 5, n_final = 1)
 loglikelihood(cheap), loglikelihood(models[4])
 ```
 
+## Testing the number of classes
+
+The information criteria rank the models but do not test them. The bootstrap
+likelihood-ratio test ([`bootstrap_lrt`](@ref)) compares ``K`` against ``K + 1``
+classes: it simulates data sets from the fitted ``K``-class model, refits both models to
+each of them, and reports the share of simulated data sets whose statistic
+``2(\ell_{K+1} - \ell_K)`` is at least as large as the observed one (see
+[Bootstrap likelihood-ratio test](@ref blrt)). The convenience form takes the data and
+``K``, fits both models and runs the test. `n_boot` is the number of simulated data sets;
+the p-value cannot go below `1 / (n_boot + 1)`, so 19 replicates resolve the 5% level,
+and a few hundred are advisable when the p-value is near the threshold.
+
+```@example tutorial
+test23 = bootstrap_lrt(d, 2; n_boot = 19, rng = StableRNG(3))
+```
+
+None of the 19 data sets simulated from two classes comes close to the observed gain of
+the third class, so the p-value is at its floor and two classes are rejected. The
+two-model form tests models that are already fitted; three against four classes tells
+the opposite story:
+
+```@example tutorial
+test34 = bootstrap_lrt(models[3], models[4]; n_boot = 19, rng = StableRNG(4))
+pvalue(test34)
+```
+
+The gain of a fourth class is typical of what three classes produce by chance, so the
+sequence of tests stops at three classes, in agreement with BIC.
+
+## Bootstrap standard errors
+
+[`bootstrap`](@ref) resamples the respondents with replacement, refits the model to
+each resample (warm-started from the fitted model), matches the class labels of every
+refit to the model, and collects the refitted parameters. Its standard errors and
+percentile confidence intervals do not rely on the asymptotic approximation behind the
+observed information matrix (see [Bootstrap standard errors](@ref bootstrap-se)). Fifty
+replicates keep this page quick; a few hundred are the usual choice.
+
+```@example tutorial
+boot = bootstrap(best; n_boot = 50, rng = StableRNG(5))
+```
+
+[`coeftable`](@ref) of the result lists the estimates with their bootstrap standard
+errors and percentile intervals on the logit scale, and [`profiles`](@ref) the response
+probabilities with the percentile intervals of the replicate probabilities:
+
+```@example tutorial
+coeftable(boot; which = :class)
+```
+
+```@example tutorial
+first(DataFrame(profiles(boot; classes = true)), 6)
+```
+
+Most bootstrap standard errors are close to those from the observed information
+matrix, as they should be in a sample of this size with well separated classes. The
+largest ratios belong to response probabilities near 0 or 1, whose logits are poorly
+determined: there the bootstrap reflects the skewed sampling distribution that the
+observed-information approximation misses.
+
+```@example tutorial
+round.(stderror(boot) ./ stderror(best); digits = 2)
+```
+
 ## Missing responses
 
 Missing values in the indicators are allowed: `missing` becomes the code `0`, which
@@ -248,7 +312,7 @@ round.(m_m.class_probs; digits = 3), round.(best.class_probs; digits = 3)
 
 The class sizes and profiles are close to those from the complete data. Rows with all
 indicators missing are kept (with a warning) and receive the class sizes as their
-posterior; covariates, when they arrive, will not accept missing values.
+posterior; covariates do not accept missing values.
 
 ## Input from any table
 
@@ -289,5 +353,7 @@ solution. Use a `StableRNG` for results that are stable across Julia versions;
 - **Standard errors** are asymptotic (observed information) and describe uncertainty
   given the number of classes; they say nothing about whether that number is right.
   Standard errors of boundary estimates are undefined and reported as `NaN`.
-- **The bootstrap likelihood-ratio test** is coming in the 0.3.0 release; see
-  [What is coming in the 0.3.0 release](@ref roadmap).
+- **The bootstrap likelihood-ratio test** resolves p-values only to `1 / (n_boot + 1)`
+  and, like the information criteria, assumes that the ``K``-class model is correctly
+  specified; use several hundred replicates when the p-value is near the threshold, and
+  make sure the alternative model is a well-replicated maximum before testing.

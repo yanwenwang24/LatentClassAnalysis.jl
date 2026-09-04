@@ -102,14 +102,14 @@ using Tables
         @test all(isnan(r.se) && isnan(r.lower) && isnan(r.upper) for r in profiles(mn))
     end
 
-    @testset "Bootstrap placeholders" begin
-        @test_throws ErrorException simulate(m)
-        @test_throws ErrorException simulate(m, 10; rng=StableRNG(1))
-        @test_throws ErrorException bootstrap(m)
-        @test_throws ErrorException bootstrap_lrt(m, m)
-        t = BootstrapLRT(m, m, 3.5, [1.0, 2.0, 4.0], 0.5, 3)
+    @testset "Bootstrap result types" begin
+        # The bootstrap itself is tested in test_bootstrap.jl
+        t = BootstrapLRT(m, m, 3.5, [1.0, 2.0, 4.0], 0.5, 3, 0, [true, true, true])
         @test pvalue(t) == 0.5
+        @test t.n_boot == 3 && t.n_negative == 0 && t.converged == [true, true, true]
         b = LCABootstrap(m, 2, zeros(2, dof(m)), [true, true])
-        @test b.n_boot == 2
+        @test b.n_boot == 2 && size(b.coefs) == (2, dof(m))
+        @test simulate(m, 10; rng=StableRNG(1)) isa LCAData
+        @test_throws ArgumentError bootstrap_lrt(m, m)          # same number of classes
     end
 end

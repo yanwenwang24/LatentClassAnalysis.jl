@@ -72,7 +72,7 @@ using LatentClassAnalysis
                     LCA._init_split, LCA.check_identifiability, LCA._standardize,
                     LCA._coef_objective, LCA._coef_derivatives!, LCA._update_coefs!,
                     LCA._class_prior, LCA.ParamLayout, LCA._pack, LCA._unpack!, LCA._score!,
-                    LCA._observed_information)
+                    LCA._observed_information, LCA._simulate, LCA._align_labels, LCA._align!)
             @test hasdoc(obj)
         end
     end

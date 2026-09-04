@@ -409,8 +409,14 @@ Result of [`bootstrap`](@ref): bootstrap replicates of the free parameters of an
 # Fields
 - `model::LCAModel`: the model that was bootstrapped
 - `n_boot::Int`: number of replicates
-- `coefs::Matrix{Float64}`: `n_boot × dof(model)` aligned coefficient replicates
+- `coefs::Matrix{Float64}`: `n_boot × dof(model)` aligned coefficient replicates, one row
+  per replicate in the order of [`coef`](@ref) (`NaN` rows for replicates whose fit
+  failed)
 - `converged::Vector{Bool}`: convergence status of every replicate fit
+
+Read it with [`vcov`](@ref vcov(::LCABootstrap)), [`stderror`](@ref stderror(::LCABootstrap)),
+[`confint`](@ref confint(::LCABootstrap)), [`coeftable`](@ref coeftable(::LCABootstrap))
+and [`profiles`](@ref profiles(::LCABootstrap)).
 """
 struct LCABootstrap
     model::LCAModel
@@ -428,9 +434,15 @@ Result of [`bootstrap_lrt`](@ref), the parametric bootstrap likelihood-ratio tes
 # Fields
 - `null::LCAModel`, `alternative::LCAModel`: the two fitted models
 - `statistic::Float64`: observed `2(ll_alternative - ll_null)`
-- `replicates::Vector{Float64}`: bootstrap statistics under the null model
-- `pvalue::Float64`: `(1 + #{replicates ≥ statistic}) / (n_boot + 1)`
-- `n_boot::Int`
+- `replicates::Vector{Float64}`: bootstrap statistics `2(ll_{K+1} - ll_K)` of the data
+  sets simulated from the null model
+- `pvalue::Float64`: `(1 + #{replicates ≥ statistic}) / (n_boot + 1)`, read with
+  [`pvalue`](@ref)
+- `n_boot::Int`: number of replicates
+- `n_negative::Int`: number of replicates whose statistic is below `-1e-6` (the
+  `K + 1`-class fit of that replicate ended at a lower log-likelihood than its `K`-class
+  fit, a sign of insufficient random starts); zero in a clean run
+- `converged::Vector{Bool}`: whether both fits of every replicate converged
 """
 struct BootstrapLRT
     null::LCAModel
@@ -439,4 +451,6 @@ struct BootstrapLRT
     replicates::Vector{Float64}
     pvalue::Float64
     n_boot::Int
+    n_negative::Int
+    converged::Vector{Bool}
 end

@@ -6,9 +6,6 @@ section heading is exported by `LatentClassAnalysis`, except where noted. The
 [Internals](@ref) section documents unexported helpers that are useful to know about
 but may change between minor versions.
 
-The bootstrap is coming in the 0.3.0 release: its functions are exported and documented
-but throw an error in this build.
-
 ## Data
 
 ```@docs
@@ -59,7 +56,7 @@ classify
 ## Profiles
 
 ```@docs
-profiles
+profiles(::LCAModel)
 show_profiles
 ```
 
@@ -73,21 +70,31 @@ response probabilities.
 ```@docs
 coef
 coefnames
-vcov
-stderror
-confint
-coeftable
+vcov(::LCAModel)
+stderror(::LCAModel)
+confint(::LCAModel)
+coeftable(::LCAModel)
 informationmatrix
 ```
 
 ## Simulation and bootstrap
 
-Coming in the 0.3.0 release; the functions below throw in this build.
+[`simulate`](@ref) draws data sets from a fitted model. [`bootstrap`](@ref) refits the
+model to resampled (or simulated) data sets, aligns the class labels of every replicate
+to the model, and returns an [`LCABootstrap`](@ref) whose `vcov`, `stderror`, `confint`,
+`coeftable` and `profiles` methods give bootstrap standard errors and percentile
+intervals. [`bootstrap_lrt`](@ref) is the parametric bootstrap likelihood-ratio test of
+``K`` against ``K + 1`` classes; see the [methodology](@ref blrt) for the algorithm.
 
 ```@docs
 simulate
 bootstrap
 LCABootstrap
+vcov(::LCABootstrap)
+stderror(::LCABootstrap)
+confint(::LCABootstrap)
+coeftable(::LCABootstrap)
+profiles(::LCABootstrap)
 bootstrap_lrt
 BootstrapLRT
 pvalue

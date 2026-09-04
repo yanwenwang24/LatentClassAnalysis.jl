@@ -98,6 +98,48 @@ function Base.show(io::IO, ::MIME"text/plain", v::AbstractVector{ModelDiagnostic
     return nothing
 end
 
+function Base.show(io::IO, b::LCABootstrap)
+    m = b.model
+    if get(io, :compact, false)
+        print(io, "LCABootstrap(", _plural(b.n_boot, "replicate"), ", ",
+              _plural(m.n_classes, "class", "classes"), ")")
+        return nothing
+    end
+    print(io, "LCABootstrap with ", _plural(b.n_boot, "replicate"), " of a ", m.n_classes,
+          "-class model (", _plural(m.n_items, "item"), ", n = ", nobs(m), ")")
+    print(io, "\n  converged replicate fits: ", count(b.converged), " of ", b.n_boot)
+    n_bad = b.n_boot - length(_finite_rows(b.coefs))
+    n_bad > 0 && print(io, "\n  replicates with non-finite coefficients (excluded): ", n_bad)
+    se = stderror(b)
+    if all(isfinite, se) && !isempty(se)
+        @printf(io, "\n  bootstrap standard errors of the %d parameters: median %.4f, range %.4f to %.4f",
+                length(se), median(se), minimum(se), maximum(se))
+    else
+        print(io, "\n  bootstrap standard errors: undefined (fewer than two usable replicates)")
+    end
+    print(io, "\n  see stderror, confint, coeftable and profiles")
+    return nothing
+end
+
+function Base.show(io::IO, t::BootstrapLRT)
+    K = t.null.n_classes
+    if get(io, :compact, false)
+        @printf(io, "BootstrapLRT(%d vs %d classes, p = %.4f)", K, K + 1, t.pvalue)
+        return nothing
+    end
+    print(io, "Bootstrap likelihood-ratio test of ", K, " against ", K + 1, " classes (n = ",
+          nobs(t.null), ")")
+    @printf(io, "\n  statistic 2(ll_%d - ll_%d): %.4f", K + 1, K, t.statistic)
+    @printf(io, "\n  bootstrap p-value: %.4f  (%s; resolution 1/%d = %.4f)", t.pvalue,
+            _plural(t.n_boot, "replicate"), t.n_boot + 1, 1 / (t.n_boot + 1))
+    @printf(io, "\n  replicate statistics: median %.4f, maximum %.4f", median(t.replicates),
+            maximum(t.replicates))
+    t.n_negative > 0 && print(io, "\n  negative replicate statistics: ", t.n_negative)
+    n_nc = count(!, t.converged)
+    n_nc > 0 && print(io, "\n  replicate fits not converged: ", n_nc)
+    return nothing
+end
+
 """
     show_profiles(m::LCAModel; var_names=nothing, var_labels=nothing, digits=3, io=stdout)
 

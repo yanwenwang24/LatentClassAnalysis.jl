@@ -173,9 +173,8 @@ unaffected. A row with every indicator missing is kept, contributes nothing to t
 item parameters, and receives the class sizes as its posterior. The MAR assumption
 cannot be tested from the data; if missingness plausibly depends on the unobserved
 answer itself (for example, refusing an income question because the income is high),
-the estimates may be biased whatever the software does. Covariates (coming in the
-0.3.0 release) will not accept missing values: rows with a missing covariate must be
-dropped.
+the estimates may be biased whatever the software does. Covariates do not accept
+missing values: rows with a missing covariate must be dropped.
 
 ## [Choosing the number of classes](@id choosing-k)
 
@@ -226,7 +225,8 @@ entropy in the numerator instead.
 
 **Guidance.** In the Monte Carlo study of [nylund2007](@cite), BIC was the most
 reliable of the information criteria for recovering the true number of classes in
-latent class models, and the bootstrap likelihood ratio test performed even better;
+latent class models, and the [bootstrap likelihood-ratio test](@ref blrt) performed
+even better;
 AIC tended to select too many classes. A sensible default is therefore to choose by
 BIC, look at sBIC and AIC for a sense of how sensitive the choice is, and then ask
 whether the additional class in the next-larger model is substantively
@@ -294,30 +294,91 @@ probabilities, for which no standard error is reported. These standard errors ar
 asymptotic and condition on the number of classes; comparing class counts is the job
 of the information criteria and the bootstrap likelihood-ratio test below.
 
-## [What is coming in the 0.3.0 release](@id roadmap)
+## [Bootstrap standard errors](@id bootstrap-se)
 
-This build of 0.3.0 contains the redesigned data and fitting layer, covariates and
-standard errors described above. The following features are part of the 0.3.0 release
-and are being finished; their functions already exist in the package but throw an
-error until then.
+The standard errors above rest on the asymptotic normality of the maximum-likelihood
+estimator, which can be a poor guide in small samples, for probabilities near 0 or 1,
+and for the class sizes of a model with covariates. [`bootstrap`](@ref) offers the
+resampling alternative of [efron1993](@cite): draw `n_boot` data sets of ``n`` rows by
+resampling the respondents with replacement (each with their covariates and their
+missing responses), refit the model to each, and take the standard deviation of the
+refitted parameters across the replicates as the standard error. With
+`parametric = true` the data sets are simulated from the fitted model instead
+([`simulate`](@ref)) and the pattern of missing responses of the original data is
+re-applied to them. Every refit is warm-started from the fitted model, so the
+replicates are cheap.
 
-- **Covariates.** Class membership can be related to respondent characteristics by
-  the concomitant-variable model of [dayton1988](@cite), in which the class sizes
-  follow a multinomial-logit regression on covariates, ``\pi_{ik} \propto
-  \exp(x_i'\beta_k)``. Estimating this one-step model jointly with the measurement
-  model avoids the attenuation bias of the naive three-step procedure — classify
-  first, then regress the assigned class on covariates — discussed by
-  [vermunt2010](@cite). Until then, relate the posteriors from [`predict`](@ref) to
-  covariates after the fact with that caveat in mind. (`prepare_data(...;
-  covariates = [...])` already stores the covariates; `fit(...; covariates = true)`
-  is the entry point.)
-- **Bootstrap likelihood-ratio test.** The parametric bootstrap test of
-  [mclachlan1987](@cite) for ``K`` against ``K + 1`` classes, the procedure
-  recommended by [nylund2007](@cite): `bootstrap_lrt(model_K, model_K1)`. It is built on
-  `simulate`, which draws data sets from a fitted model, and `bootstrap`, which
-  also provides bootstrap standard errors.
+Two details matter for mixture models. First, the classes of a refitted model come in
+an arbitrary order (*label switching*); before anything is averaged, the classes of
+every replicate are matched to those of the fitted model by the permutation that
+minimises the squared differences between the response probabilities and class sizes.
+Second, the replicates are collected on the logit scale of [`coef`](@ref), where the
+sampling distributions are closer to symmetric, and the summaries of
+[`profiles`](@ref profiles(::LCABootstrap)) are computed after mapping every replicate
+back to probabilities, so that its *percentile intervals* — the 2.5th and 97.5th
+percentiles of the replicate probabilities at the 95% level — lie within ``[0, 1]``
+without a delta-method approximation. With covariates this also yields standard errors
+for the averaged class sizes, which the observed-information approach leaves
+undefined. A few hundred replicates are enough for standard errors; percentile
+intervals at the 95% level are better estimated with a thousand or more.
 
-Survey weights are not planned for 0.3.0.
+## [Bootstrap likelihood-ratio test](@id blrt)
+
+Information criteria rank models by a penalised likelihood but offer no test. The
+natural test of ``K`` against ``K + 1`` classes is the likelihood-ratio statistic
+
+```math
+T = 2\,(\ell_{K+1} - \ell_K),
+```
+
+twice the gain in log-likelihood from the additional class. Its usual chi-squared
+reference distribution does not apply here: the ``K``-class model is obtained from the
+``(K + 1)``-class model by setting a class size to zero or making two classes
+identical, which places the null hypothesis on the boundary of the parameter space,
+where the regularity conditions of the chi-squared approximation fail.
+[mclachlan1987](@cite) proposed to obtain the reference distribution by simulation
+instead — the *parametric bootstrap* — and the Monte Carlo study of
+[nylund2007](@cite) found this bootstrap likelihood-ratio test (BLRT) to be the most
+accurate tool for recovering the number of classes in latent class models, ahead of
+BIC. [`bootstrap_lrt`](@ref) implements it:
+
+1. Fit the ``K``- and ``(K + 1)``-class models to the data and compute ``T``.
+2. Simulate ``B`` data sets from the fitted ``K``-class model, with the original sample
+   size, covariates and pattern of missing responses.
+3. Fit both models to every simulated data set and compute its statistic ``T_b``. The
+   ``T_b`` are draws from the distribution of ``T`` when the ``K``-class model is true.
+4. The p-value is the share of replicates at least as large as the observed statistic,
+   ```math
+   p = \frac{1 + \#\{b : T_b \ge T\}}{B + 1},
+   ```
+   where the observed data count as one further replicate. This form makes the test
+   exact for any ``B`` and keeps ``p`` above zero [davison1997](@cite).
+
+A small ``p`` says that the improvement from the extra class is larger than what ``K``
+classes would generate by chance, and favours ``K + 1`` classes; the usual procedure
+tests 1 against 2, 2 against 3, and so on, and stops at the first ``K`` that is not
+rejected. The **resolution** of the p-value is ``1/(B + 1)``: with ``B = 19`` the
+smallest attainable value is 0.05, with ``B = 99`` it is 0.01. Choose ``B`` with the
+significance level in mind, and use several hundred replicates when the p-value comes
+out close to the threshold. The **cost** is ``B`` fits of each model. The ``K``-class
+refits are warm-started from the fitted model, and the ``(K + 1)``-class refits from
+the replicate's ``K``-class solution with its largest class split in two, plus
+`n_starts_boot` random starts of which `n_final_boot` are continued. The split start
+makes the ``(K + 1)``-class log-likelihood of every replicate at least that of its
+``K``-class fit, up to the small perturbation that separates the two halves, so that
+``T_b \ge 0``; a replicate that nevertheless ends below zero signals a local maximum and
+is counted in the `n_negative` field of the result with a warning. Because the
+replicate fits use fewer random starts than a careful analysis of the real data, a
+``(K + 1)``-class replicate fit that misses its global maximum makes ``T_b`` too small
+and the test slightly liberal; raising `n_starts_boot` removes the effect at a
+proportional cost. The observed ``T`` has the opposite vulnerability: if the fitted
+``(K + 1)``-class model is itself a local maximum, ``T`` is understated, which is why
+`bootstrap_lrt` warns when its best log-likelihood was not replicated across starts.
+
+Like the information criteria, the test assumes that the ``K``-class model is
+correctly specified, including local independence. With many respondents, small
+departures from the model suffice to reject every ``K``, and the substantive
+interpretability of the classes remains the final arbiter.
 
 ## References
 

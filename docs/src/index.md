@@ -123,7 +123,7 @@ originally developed [wang2024](@cite):
 
 Comparable tools in other environments include the R package poLCA
 [linzer2011](@cite), Mplus, and Latent GOLD. LatentClassAnalysis.jl implements the
-unconditional latent class model with random restarts and missing-data support;
-covariates on class membership, and standard errors from the observed information
-matrix; the bootstrap likelihood-ratio test is coming in the 0.3.0 release, see
-[What is coming in the 0.3.0 release](@ref roadmap).
+latent class model with random restarts, missing-data support, covariates on class
+membership, standard errors from the observed information matrix or the bootstrap, and
+the bootstrap likelihood-ratio test for the number of classes (see
+[Bootstrap likelihood-ratio test](@ref blrt)).
