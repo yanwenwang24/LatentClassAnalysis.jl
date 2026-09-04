@@ -54,10 +54,12 @@ averaged over the sample. Response-pattern aggregation is disabled with covariat
   finite-difference Hessian; `2·dof` E-step passes) and stores it in `vcov`, which
   [`vcov`](@ref), [`stderror`](@ref), [`confint`](@ref), [`coeftable`](@ref) and the
   `se`/`lower`/`upper` columns of [`profiles`](@ref) read. Parameters on the boundary
-  (a probability within `1e-6` of 0 or 1) get `NaN` standard errors with a warning, as
-  does the whole matrix when the observed information is not positive definite or the
-  covariate coefficients diverged. `:none` skips the computation (`vcov` is `nothing`);
-  use it for bootstrap replicates or very large models.
+  (a probability within `1e-6` of 0 or 1) are held fixed and get `NaN` standard errors
+  with a warning; the standard errors of the remaining cells in a row with a boundary
+  cell are conditional on the boundary cell being fixed. The whole matrix is `NaN` when
+  the observed information is not positive definite or the covariate coefficients
+  diverged. `:none` skips the computation (`vcov` is `nothing`); use it for bootstrap
+  replicates or very large models.
 - `aggregate::Bool=true`: collapse identical response patterns before running EM (exact;
   disabled automatically with covariates)
 - `multithreaded::Bool=false`: run the starts on all Julia threads (results are identical

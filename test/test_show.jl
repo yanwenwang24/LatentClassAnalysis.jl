@@ -112,6 +112,15 @@ using StableRNGs
         @test occursin(r"\d+\.\d{3}%", out)
         @test count("%", out) == model.n_classes + model.n_classes * sum(d.n_categories)
 
+        # Class-size lines: the percent sign glued to the number, one space before ±, the
+        # standard error with the same number of decimals, and the ± aligned across classes
+        @test occursin(r"^  Class 1: \d+\.\d{3}% ±\d+\.\d{3}$"m, out)
+        @test occursin(r"^  Class 2: \d+\.\d{3}% ±\d+\.\d{3}$"m, out)
+        @test !occursin(r"\d %", out) && !occursin("%±", out)
+        class_lines = [l for l in split(out, '\n') if startswith(l, "  Class ")]
+        @test length(class_lines) == model.n_classes
+        @test allequal(findfirst('±', l) for l in class_lines)
+
         # Deterministic; the io keyword writes elsewhere; nothing is returned
         @test capture_stdout(() -> show_profiles(model)) == out
         buf = IOBuffer()
@@ -122,10 +131,14 @@ using StableRNGs
 
     @testset "show_profiles: printed values match the model" begin
         out = sprint(io -> show_profiles(model; io=io))
-        sizes = [parse(Float64, mt.captures[2]) for mt in eachmatch(r"Class (\d+): (\d+\.\d)\s*%", out)]
+        sizes = [parse(Float64, mt.captures[2]) for mt in eachmatch(r"^  Class (\d+): +(\d+\.\d{3})% ±\d+\.\d{3}$"m, out)]
         @test length(sizes) == model.n_classes
-        @test isapprox(sum(sizes), 100.0; atol=0.11)
-        @test all(isapprox.(sizes, model.class_probs .* 100; atol=0.051))
+        @test isapprox(sum(sizes), 100.0; atol=0.0011)
+        @test all(isapprox.(sizes, model.class_probs .* 100; atol=0.00051))
+        # The class-size standard errors are those of profiles(model; classes=true)
+        ses = [parse(Float64, mt.captures[1]) for mt in eachmatch(r"^  Class \d+: +\d+\.\d{3}% ±(\d+\.\d{3})$"m, out)]
+        pc = profiles(model; classes=true)[1:model.n_classes]
+        @test all(isapprox.(ses, [r.se for r in pc] .* 100; atol=0.00051))
 
         mt = match(r"^1:\s+(\d+\.\d{3})% ±\S+\s+(\d+\.\d{3})% ±\S+"m, out)
         @test mt !== nothing
@@ -137,10 +150,13 @@ using StableRNGs
         out1 = sprint(io -> show_profiles(model; digits=1, io=io))
         @test occursin(r"\d+\.\d%", out1)
         @test !occursin(r"\d+\.\d{2,}%", out1)
+        @test occursin(r"^  Class 1: \d+\.\d% ±\d+\.\d$"m, out1)
         out0 = sprint(io -> show_profiles(model; digits=0, io=io))
         @test occursin(r"^1:\s+\d+% ±\d+\s+\d+% ±\d+"m, out0)
+        @test occursin(r"^  Class 1: \d+% ±\d+$"m, out0)
         out4 = sprint(io -> show_profiles(model; digits=4, io=io))
         @test occursin(r"^1:\s+\d+\.\d{4}% ±\d+\.\d{4}\s+\d+\.\d{4}% ±\d+\.\d{4}"m, out4)
+        @test occursin(r"^  Class 1: \d+\.\d{4}% ±\d+\.\d{4}$"m, out4)
         @test_throws ArgumentError show_profiles(model; digits=-1, io=IOBuffer())
     end
 

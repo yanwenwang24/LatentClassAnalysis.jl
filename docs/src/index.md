@@ -97,7 +97,9 @@ same generator and the same data always give the same model.
   latent class analysis using the data bundled with the package.
 - [Upgrading from 0.2](@ref): every 0.2 call next to its 0.3 replacement, and what
   changed in the results.
-- [API reference](@ref): docstrings of every exported function and type.
+- API reference, in two pages: [data, fitting, prediction](@ref api-core) and
+  [inference, bootstrap, deprecated](@ref api-inference): docstrings of every exported
+  function and type.
 - [Changelog](@ref): what changed in each release.
 
 ## Citing

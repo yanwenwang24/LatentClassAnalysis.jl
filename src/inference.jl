@@ -396,8 +396,10 @@ function _fit_vcov(θ::LCAParams, ws::LCAWorkspace, opts::LCAOptions, diverged::
     nfix = n - count(layout.free)
     if nfix > 0
         push!(msgs, nfix == 1 ?
-              "1 parameter is on the boundary (0 or 1); its standard error is undefined and reported as NaN" :
-              "$nfix parameters are on the boundary (0 or 1); their standard errors are undefined and reported as NaN")
+              "1 parameter is on the boundary (0 or 1); its standard error is undefined and reported as NaN, " *
+              "and the remaining standard errors are conditional on it being held fixed" :
+              "$nfix parameters are on the boundary (0 or 1); their standard errors are undefined and reported as NaN, " *
+              "and the remaining standard errors are conditional on them being held fixed")
     end
     return _to_public_vcov(V, layout, ws.A), msgs
 end
@@ -483,9 +485,11 @@ end
 
 Covariance matrix of [`coef`](@ref) (`dof × dof`), the inverse of the observed information
 matrix computed by [`fit`](@ref) with `se=:hessian` (the default). Rows and columns of
-parameters on the boundary (a probability within `1e-6` of 0 or 1) are `NaN`, and the whole
-matrix is `NaN` when the observed information is not positive definite or the covariate
-coefficients diverged. Throws an `ErrorException` for a model fitted with `se=:none`.
+parameters on the boundary (a probability within `1e-6` of 0 or 1) are `NaN`; those
+parameters are held fixed in the information matrix, so the remaining entries are
+conditional on them. The whole matrix is `NaN` when the observed information is not
+positive definite or the covariate coefficients diverged. Throws an `ErrorException` for
+a model fitted with `se=:none`.
 """
 function StatsAPI.vcov(m::LCAModel)
     m.vcov === nothing && throw(ErrorException(
@@ -586,49 +590,73 @@ end
 # Delta method: class sizes and item-response probabilities
 # ---------------------------------------------------------------------------------------
 
-# Delta-method covariance of the class sizes (K × K). NaN without a covariance matrix and
-# for covariate models (whose class sizes are sample averages of the covariate-specific
-# membership probabilities); zero for a single class.
-function _class_covariance(m::LCAModel, layout::ParamLayout, V::Union{Nothing,AbstractMatrix})
-    K = layout.K
-    out = fill(NaN, K, K)
-    V === nothing && return out
-    K == 1 && return zeros(1, 1)
-    layout.covariates && return out
-    idx = 1:(K - 1)
-    Vα = V[idx, idx]
-    all(isfinite, Vα) || return out
-    π = m.class_probs
-    Jm = Matrix{Float64}(undef, K, K - 1)
-    for l in 2:K, k in 1:K
-        Jm[k, l - 1] = π[k] * ((k == l ? 1.0 : 0.0) - π[l])
-    end
-    return Jm * Vα * transpose(Jm)
-end
-
-# Delta-method covariance of row k of item_probs[j] (C_j × C_j): with the row's logits γ_d
-# (d ≠ ref) and B = softmax, ∂B_c/∂γ_d = B_c(δ_cd - B_d). NaN when the row has a parameter
-# without variance (boundary) or the model has no covariance matrix.
-function _profile_covariance(m::LCAModel, layout::ParamLayout, V::Union{Nothing,AbstractMatrix},
-                             j::Integer, k::Integer)
-    C = layout.C[j]
+# Delta-method covariance of the probabilities `p = softmax(γ)` of one block (a row of
+# item_probs, or the class sizes), given the logits' parameter indices `idx` (in category
+# order, the reference category `r` omitted) and the covariance matrix `V` of all
+# parameters. Only the free logits (`free[idx]`) enter: a logit held fixed on the boundary
+# has zero variance and zero covariance, so its Jacobian column drops out and the result is
+# the covariance of the remaining cells *conditional* on the boundary cell being fixed, as
+# Mplus and Latent GOLD report it. With `∂p_c/∂γ_d = p_c(δ_cd - p_d)` for the free `d`,
+# `S = J V_free J'`; the rows and columns of the boundary cells themselves are NaN. All NaN
+# when no logit is free (the reference cell is at 1 and every other cell at 0, or a class
+# block whose reference class has size 1) or when the free block of `V` is not finite.
+function _softmax_covariance(p::AbstractVector{<:Real}, r::Integer, idx::AbstractUnitRange,
+                             free::AbstractVector{Bool}, V::AbstractMatrix)
+    C = length(p)
     out = fill(NaN, C, C)
-    V === nothing && return out
-    idx = _row_indices(layout, j, k)
-    Vr = V[idx, idx]
-    all(isfinite, Vr) || return out
-    B = view(m.item_probs[j], k, :)
-    r = layout.ref_cat[j][k]
-    Jm = Matrix{Float64}(undef, C, C - 1)
-    d = 0
-    for dc in 1:C
-        dc == r && continue
-        d += 1
-        for c in 1:C
-            Jm[c, d] = B[c] * ((c == dc ? 1.0 : 0.0) - B[dc])
+    free_idx = Int[]
+    free_cats = Int[]
+    i = first(idx)
+    for c in 1:C
+        c == r && continue
+        if free[i]
+            push!(free_idx, i)
+            push!(free_cats, c)
+        end
+        i += 1
+    end
+    isempty(free_idx) && return out
+    Vf = V[free_idx, free_idx]
+    all(isfinite, Vf) || return out
+    Jm = Matrix{Float64}(undef, C, length(free_cats))
+    for (d, dc) in enumerate(free_cats), c in 1:C
+        Jm[c, d] = p[c] * ((c == dc ? 1.0 : 0.0) - p[dc])
+    end
+    S = Jm * Vf * transpose(Jm)
+    for c in 1:C
+        if !_interior(p[c])
+            S[c, :] .= NaN
+            S[:, c] .= NaN
         end
     end
-    return Jm * Vr * transpose(Jm)
+    return S
+end
+
+# Delta-method covariance of the class sizes (K × K). NaN without a covariance matrix and
+# for covariate models (whose class sizes are sample averages of the covariate-specific
+# membership probabilities); zero for a single class. A class whose size is on the boundary
+# (empty) gets NaN and the other classes conditional standard errors (see
+# `_softmax_covariance`).
+function _class_covariance(class_probs::AbstractVector{<:Real}, layout::ParamLayout,
+                           V::Union{Nothing,AbstractMatrix})
+    K = layout.K
+    V === nothing && return fill(NaN, K, K)
+    K == 1 && return zeros(1, 1)
+    layout.covariates && return fill(NaN, K, K)
+    return _softmax_covariance(class_probs, 1, 1:(K - 1), layout.free, V)
+end
+_class_covariance(m::LCAModel, layout::ParamLayout, V::Union{Nothing,AbstractMatrix}) =
+    _class_covariance(m.class_probs, layout, V)
+
+# Delta-method covariance of row k of item_probs[j] (C_j × C_j): with the row's logits γ_d
+# (d ≠ ref) and B = softmax, ∂B_c/∂γ_d = B_c(δ_cd - B_d). NaN without a covariance matrix;
+# a cell on the boundary gets NaN and the other cells of its row standard errors conditional
+# on it being fixed (see `_softmax_covariance`).
+function _profile_covariance(m::LCAModel, layout::ParamLayout, V::Union{Nothing,AbstractMatrix},
+                             j::Integer, k::Integer)
+    V === nothing && return fill(NaN, layout.C[j], layout.C[j])
+    return _softmax_covariance(view(m.item_probs[j], k, :), layout.ref_cat[j][k],
+                               _row_indices(layout, j, k), layout.free, V)
 end
 
 _sqrt_diag(S::AbstractMatrix) = [isnan(S[i, i]) ? NaN : sqrt(max(S[i, i], 0.0)) for i in 1:size(S, 1)]
@@ -665,15 +693,20 @@ Rows are ordered by item, then level, then class; there are `Σ_j C_j · K` rows
 
 The standard errors come from [`vcov`](@ref) by the delta method: for a row of
 probabilities `B = softmax(γ)` with the model's logits `γ`, `Var(B) = J vcov(γ) J'` with
-`∂B_c/∂γ_d = B_c(δ_cd - B_d)`. `se`, `lower` and `upper` are `NaN` for a row that
-contains a probability on the boundary (within `1e-6` of 0 or 1) and for every row of a
-model fitted with `se=:none`.
+`∂B_c/∂γ_d = B_c(δ_cd - B_d)`. A probability on the boundary (within `1e-6` of 0 or 1)
+has no standard error: its logit is held fixed, `se` is `NaN` and `lower = upper = prob`.
+The standard errors of the remaining cells in a row with a boundary cell are conditional
+on the boundary cell being fixed (only the free logits of the row enter the delta
+method, as in Mplus and Latent GOLD). When a row has no free logit (its modal
+probability is 1) `se`, `lower` and `upper` are `NaN` for the whole row, as they are for
+every row of a model fitted with `se=:none`.
 
 With `classes=true` the table starts with one row per class holding its size:
 `item = :class`, `level = "k"`, `class = k`, `prob = class_probs[k]`, with the
-delta-method standard error from the class-membership block (softmax Jacobian). For a
-model with covariates the class sizes are sample averages of the covariate-specific
-membership probabilities and their standard errors are reported as `NaN`.
+delta-method standard error from the class-membership block (softmax Jacobian; an
+empty class is treated like a boundary cell). For a model with covariates the class
+sizes are sample averages of the covariate-specific membership probabilities and their
+standard errors are reported as `NaN`.
 
 # Arguments
 - `m::LCAModel`: fitted model
@@ -691,10 +724,11 @@ function profiles(m::LCAModel; level::Real=0.95, classes::Bool=false)
     se_class, se_items = _profile_se(m)
     rows = _ProfileRow[]
     if classes
+        conditional = any(isfinite, se_class)
         for k in 1:m.n_classes
             p = m.class_probs[k]
             se = se_class[k]
-            lower, upper = _logit_ci(p, se, z)
+            lower, upper = _profile_ci(p, se, z, conditional)
             push!(rows, (item=:class, level=string(k), class=k, prob=p, se=se,
                          lower=lower, upper=upper))
         end
@@ -702,11 +736,21 @@ function profiles(m::LCAModel; level::Real=0.95, classes::Bool=false)
     for j in 1:m.n_items, c in 1:m.n_categories[j], k in 1:m.n_classes
         p = m.item_probs[j][k, c]
         se = se_items[j][k, c]
-        lower, upper = _logit_ci(p, se, z)
+        conditional = any(isfinite, view(se_items[j], k, :))
+        lower, upper = _profile_ci(p, se, z, conditional)
         push!(rows, (item=m.data.item_names[j], level=m.data.item_levels[j][c], class=k,
                      prob=p, se=se, lower=lower, upper=upper))
     end
     return rows
+end
+
+# Confidence interval of one probability of a softmax block: the logit-scale interval when
+# its standard error is defined; the degenerate interval (p, p) for a cell held fixed on
+# the boundary while the other cells of its block have (conditional) standard errors; NaN
+# otherwise (no covariance matrix, or a block with no free logit).
+function _profile_ci(p::Real, se::Real, z::Real, conditional::Bool)
+    isnan(se) && conditional && !_interior(p) && return (Float64(p), Float64(p))
+    return _logit_ci(p, se, z)
 end
 
 # Confidence interval of a probability from its standard error, on the logit scale.

@@ -63,10 +63,11 @@ function Base.show(io::IO, m::LCAModel)
 end
 
 # Coefficient table of the class-membership model: rows = covariates, columns = classes 2..K.
+# The intercept row is labelled "(Intercept)" as in coefnames/coeftable.
 function _show_coefficients(io::IO, m::LCAModel)
     K = m.n_classes
-    names = string.(m.data.covariate_names)
-    w = max(9, maximum(length, names))
+    names = ["(Intercept)"; string.(m.data.covariate_names[2:end])]
+    w = maximum(length, names)
     print(io, "\n  class-membership coefficients (log-odds against class 1):")
     print(io, "\n    ", rpad("", w), join([lpad("class $k", 11) for k in 2:K]))
     for p in eachindex(names)
@@ -150,7 +151,9 @@ level labels default to those stored in `m.data`.
 When the model carries a covariance matrix (fitted with `se=:hessian`, the default),
 every percentage is followed by `±` its delta-method standard error in percentage points
 (see [`profiles`](@ref)); an undefined standard error (a probability on the boundary, or
-the class sizes of a model with covariates) prints as `NaN`.
+the class sizes of a model with covariates) prints as `NaN`. The standard errors of the
+remaining cells in a row with a boundary cell are conditional on the boundary cell being
+fixed.
 
 # Arguments
 - `m::LCAModel`: fitted model
@@ -193,9 +196,13 @@ function show_profiles(m::LCAModel;
     println(io, "Latent Class Profiles")
     println(io, "="^80)
     println(io, "Class Sizes:")
+    # "Class k:" and the percentages are padded to a common width so the columns align
+    kw = length("Class $(m.n_classes):")
+    pstrs = [Printf.format(fmt, p * 100) for p in m.class_probs]
+    pw = maximum(length, pstrs)
     for k in 1:m.n_classes
-        print(io, "  Class $k: $(rpad(@sprintf("%.1f", m.class_probs[k] * 100), 6))%")
-        withse && @printf(io, " ±%.1f", se_class[k] * 100)
+        print(io, "  ", rpad("Class $k:", kw), " ", lpad(pstrs[k], pw))
+        withse && print(io, " ±", Printf.format(sefmt, se_class[k] * 100))
         println(io)
     end
     println(io, "-"^80)

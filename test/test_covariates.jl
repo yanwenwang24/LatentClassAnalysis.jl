@@ -448,7 +448,8 @@ const LCA = LatentClassAnalysis
         @test occursin("covariates: x", s)
         @test occursin("class-membership coefficients (log-odds against class 1):", s)
         @test occursin(r"class 2", s)
-        @test occursin(r"^\s+intercept\s+-?\d+\.\d{4}$"m, s)
+        @test occursin(r"^\s+\(Intercept\)\s+-?\d+\.\d{4}$"m, s)     # the label of coefnames
+        @test !occursin(r"^\s+intercept\b"m, s)
         @test occursin(r"^\s+x\s+-?\d+\.\d{4}$"m, s)
         @test occursin("fit flags: none", s)
         @test sprint(show, m; context=:compact => true) == "LCAModel(2 classes, 6 items, n = $n)"
@@ -456,7 +457,7 @@ const LCA = LatentClassAnalysis
         s3 = sprint(show, m3)
         @test occursin("covariates: x1, x2", s3)
         @test occursin(r"class 2\s+class 3", s3)
-        @test count(r"^\s+(intercept|x1|x2)\s+-?\d+\.\d{4}\s+-?\d+\.\d{4}$"m, s3) == 3
+        @test count(r"^\s+(\(Intercept\)|x1|x2)\s+-?\d+\.\d{4}\s+-?\d+\.\d{4}$"m, s3) == 3
         # show_profiles is unchanged
         out = sprint(io -> show_profiles(m; io=io))
         @test occursin("Latent Class Profiles", out) && !occursin("coefficients", out)

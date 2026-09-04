@@ -53,7 +53,7 @@ julia --project=examples examples/example_childless.jl
 
 - A docstring must be immediately followed by its definition. A blank line in between
   silently detaches it (this happened to six functions before 0.2.2).
-- Every exported symbol has a docstring and an `@docs` entry in `docs/src/api.md`; the docs
+- Every exported symbol has a docstring and an `@docs` entry in `docs/src/api/` (core.md or inference.md); the docs
   build runs with `warnonly=false` and `checkdocs=:exports`, so a missing entry fails CI.
 - Tests generate data with `StableRNG` seeds and pass `rng=StableRNG(seed)` to every
   `fit`; a fit is bitwise reproducible for a given `rng`, so tests may compare fits with

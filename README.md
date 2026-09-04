@@ -100,7 +100,8 @@ lists every old call next to its replacement and explains what changed in the re
 - [Example: childlessness in Singapore](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/example_childless/):
   replication of the 2024 paper with the bundled data
 - [Upgrading from 0.2](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/migration/)
-- [API reference](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/api/)
+- API reference: [data, fitting, prediction](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/api/core/)
+  and [inference, bootstrap, deprecated](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/api/inference/)
 
 The scripts in [`examples/`](examples/) run the same workflows outside the docs:
 

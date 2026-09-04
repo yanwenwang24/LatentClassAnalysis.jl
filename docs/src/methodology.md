@@ -288,7 +288,9 @@ standard errors and confidence intervals computed on the logit scale (hence with
 ``[0, 1]`` and asymmetric around the estimate). Two limitations are inherent to the
 approach. A probability estimated at exactly 0 or 1 lies on the boundary of the
 parameter space, where the Wald approximation does not hold: the corresponding
-parameters are held fixed and their standard errors are reported as `NaN`. And with
+parameters are held fixed and their standard errors are reported as `NaN`, while the
+standard errors of the remaining probabilities in that row are conditional on the
+fixed value (the convention of Mplus and Latent GOLD). And with
 covariates the class sizes are sample averages of the covariate-specific membership
 probabilities, for which no standard error is reported. These standard errors are
 asymptotic and condition on the number of classes; comparing class counts is the job

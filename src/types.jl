@@ -331,8 +331,9 @@ class of `beta`.
 - `options::LCAOptions`: the settings used
 - `vcov::Union{Nothing,Matrix{Float64}}`: `dof × dof` covariance matrix of [`coef`](@ref)
   from the observed information matrix (`se=:hessian`, the default), with `NaN` rows and
-  columns for parameters on the boundary; `nothing` when fitted with `se=:none`. Read it
-  through [`vcov`](@ref), [`stderror`](@ref), [`confint`](@ref) and [`coeftable`](@ref)
+  columns for parameters on the boundary (held fixed, so the remaining entries are
+  conditional on them); `nothing` when fitted with `se=:none`. Read it through
+  [`vcov`](@ref), [`stderror`](@ref), [`confint`](@ref) and [`coeftable`](@ref)
 - `flags::FitFlags`: post-fit warnings, see [`FitFlags`](@ref)
 
 Use [`predict`](@ref)/[`classify`](@ref) for memberships, [`profiles`](@ref) and

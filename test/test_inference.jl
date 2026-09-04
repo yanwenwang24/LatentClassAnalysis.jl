@@ -436,6 +436,82 @@ end
         @test Ib[good, good] * V[good, good] ≈ I atol = 1e-8
     end
 
+    @testset "Conditional standard errors in a row with a boundary cell" begin
+        # A three-category item whose third category has probability 0.001 in class 1: in
+        # a sample of 400 that cell is empty and its estimate hits the floor, while the two
+        # other cells of the row stay interior
+        items_c = [[0.55 0.449 0.001; 0.2 0.3 0.5], [[0.85 0.15; 0.15 0.85] for _ in 1:6]...]
+        yc, _ = simulate_lca(StableRNG(62), 400, [0.6, 0.4], items_c)
+        # One warning, mentioning both the boundary cell and the conditional standard errors
+        mcb = @test_logs (:warn, r"1 item-response probabilit.* on the boundary \(0 or 1\); 1 parameter is on the boundary \(0 or 1\); its standard error is undefined and reported as NaN, and the remaining standard errors are conditional on it being held fixed$") fit(
+            LCAModel, LCAData(yc), 2; rng=StableRNG(1), n_starts=4, n_final=2)
+        @test mcb.converged && mcb.flags.n_boundary == 1
+        kb = argmin(mcb.item_probs[1][:, 3])
+        B = mcb.item_probs[1][kb, :]
+        @test B[3] <= 1e-6 && all(LCA._interior, B[1:2])
+        layout = LCA.ParamLayout(mcb)
+        idx = LCA._row_indices(layout, 1, kb)
+        @test count(!, layout.free) == 1 && count(layout.free[idx]) == 1
+        bad = idx[findfirst(!, layout.free[idx])]
+        # vcov itself is unchanged: NaN row and column for the boundary logit only
+        V = vcov(mcb)
+        @test all(isnan, V[bad, :]) && all(isnan, V[:, bad])
+        @test count(isnan, stderror(mcb)) == 1
+        # The boundary cell has no standard error and a degenerate interval; the two other
+        # cells of the row have finite, positive standard errors and proper intervals
+        rows = [r for r in profiles(mcb) if r.item == :item1 && r.class == kb]
+        @test length(rows) == 3 && rows[3].prob == B[3]
+        @test isnan(rows[3].se) && rows[3].lower == rows[3].upper == rows[3].prob
+        @test all(isfinite(rows[c].se) && rows[c].se > 0 for c in 1:2)
+        @test all(0 < rows[c].lower < rows[c].prob < rows[c].upper < 1 for c in 1:2)
+        # ... equal to the delta method on the sub-covariance of the row's free logit,
+        # computed by hand: the fixed logit has zero variance, so its column drops out
+        r = layout.ref_cat[1][kb]
+        cats = [c for c in 1:3 if c != r]                        # parameter order of the row
+        free_cats = cats[layout.free[idx]]
+        free_idx = idx[layout.free[idx]]
+        @test free_cats == [c for c in 1:2 if c != r] && length(free_idx) == 1
+        Jf = [B[c] * ((c == dc ? 1.0 : 0.0) - B[dc]) for c in 1:3, dc in free_cats]
+        S = Jf * V[free_idx, free_idx] * transpose(Jf)
+        @test [rows[c].se for c in 1:2] ≈ sqrt.(diag(S)[1:2]) rtol = 1e-8
+        @test maximum(abs, sum(S, dims=1)) < 1e-12
+        Sc = LCA._profile_covariance(mcb, layout, V, 1, kb)
+        @test Sc[1:2, 1:2] ≈ S[1:2, 1:2] rtol = 1e-12
+        @test all(isnan, Sc[3, :]) && all(isnan, Sc[:, 3])
+        # Every other cell, and the class sizes, are unaffected
+        @test all(isfinite(r.se) && isfinite(r.lower) && isfinite(r.upper)
+                  for r in profiles(mcb; classes=true) if !(r.item == :item1 && r.class == kb))
+        # Printed: NaN for the boundary cell only
+        out = sprint(io -> show_profiles(mcb; io=io))
+        @test count("±NaN", out) == 1
+        @test occursin("NaN for 1 of $(dof(mcb)) parameters", sprint(show, mcb))
+        # The interval rule: (p, p) for a fixed cell whose row has conditional standard
+        # errors, NaN when the row has none
+        @test LCA._profile_ci(1e-10, NaN, 1.96, true) == (1e-10, 1e-10)
+        @test all(isnan, LCA._profile_ci(1e-10, NaN, 1.96, false))
+        @test all(isnan, LCA._profile_ci(0.5, NaN, 1.96, true))
+        @test LCA._profile_ci(0.5, 0.1, 1.96, true) == LCA._logit_ci(0.5, 0.1, 1.96)
+
+        # The class-size block follows the same rule: an empty class gets NaN and the other
+        # classes conditional standard errors from the free log-odds only
+        πb = [0.6, 0.4 - 1e-8, 1e-8]
+        θb = LCA._init_random(StableRNG(11), 3, d.n_categories)
+        layb = LCA.ParamLayout(πb, θb.item_probs, nothing)
+        @test layb.free[1] && !layb.free[2]
+        Vb = fill(NaN, layb.n_total, layb.n_total)
+        Vb[1, 1] = 0.02
+        Sb = LCA._class_covariance(πb, layb, Vb)
+        @test all(isnan, Sb[3, :]) && all(isnan, Sb[:, 3])
+        Jb = [πb[k] * ((k == 2 ? 1.0 : 0.0) - πb[2]) for k in 1:3]
+        @test Sb[1:2, 1:2] ≈ (Jb * 0.02 * transpose(Jb))[1:2, 1:2]
+        @test all(isfinite, Sb[1:2, 1:2])
+        # No free log-odds (class 1 has size 1): the whole block is NaN
+        π1 = [1 - 2e-7, 1e-7, 1e-7]
+        lay1 = LCA.ParamLayout(π1, θb.item_probs, nothing)
+        @test !any(lay1.free[1:2])
+        @test all(isnan, LCA._class_covariance(π1, lay1, Vb))
+    end
+
     @testset "Diverged coefficients" begin
         rng_s = StableRNG(71)
         ns = 600
@@ -528,10 +604,11 @@ end
         @test sprint(show, fit(LCAModel, d2, 1); context=:compact => true) == "LCAModel(1 class, 6 items, n = $n2)"
         @test occursin("LCAModel with 2 classes, 6 items and $n2 observations", s)
         out = sprint(io -> show_profiles(m2; io=io))
-        @test occursin(r"Class 1: \d+\.\d\s*% ±\d\.\d", out)
+        @test occursin(r"^  Class 1: \d+\.\d{3}% ±\d+\.\d{3}$"m, out)
         @test occursin(r"^1:\s+\d+\.\d{3}% ±\d+\.\d{3}\s+\d+\.\d{3}% ±\d+\.\d{3}"m, out)
         @test count("±", out) == 2 + 2 * 12
         out1 = sprint(io -> show_profiles(m2; digits=1, io=io))
+        @test occursin(r"^  Class 1: \d+\.\d% ±\d+\.\d$"m, out1)
         @test occursin(r"^1:\s+\d+\.\d% ±\d+\.\d\s+\d+\.\d% ±\d+\.\d"m, out1)
         # Covariate model: class sizes have no standard error, items do
         outc = sprint(io -> show_profiles(mc; io=io))

@@ -37,7 +37,7 @@ makedocs(;
         "Methodology" => "methodology.md",
         "Example: childlessness in Singapore" => "example_childless.md",
         "Upgrading from 0.2" => "migration.md",
-        "API reference" => "api.md",
+        "API reference" => ["api/core.md", "api/inference.md"],
         "Changelog" => "changelog.md",
     ],
     plugins=[bib],

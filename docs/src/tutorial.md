@@ -149,8 +149,9 @@ by default (`se = :none` skips it). The free parameters on the logit scale, thei
 standard errors, Wald tests and confidence intervals are tabulated by
 [`coeftable`](@ref); `which = :class` restricts it to the class-membership block
 (here the log-odds of each class against class 1) and `which = :items` to the
-response logits. A probability estimated at exactly 0 or 1 has no standard error
-(`NaN`), which `fit` reports in its warning.
+response logits. A probability estimated at exactly 0 or 1 is held fixed and has no
+standard error (`NaN`), which `fit` reports in its warning; the other cells of its row
+keep theirs, conditional on the boundary cell being fixed.
 
 ```@example tutorial
 coeftable(best; which = :class)
@@ -352,7 +353,8 @@ solution. Use a `StableRNG` for results that are stable across Julia versions;
   log-likelihood across starts are the symptoms to watch.
 - **Standard errors** are asymptotic (observed information) and describe uncertainty
   given the number of classes; they say nothing about whether that number is right.
-  Standard errors of boundary estimates are undefined and reported as `NaN`.
+  Standard errors of boundary estimates are undefined and reported as `NaN`; those of
+  the other cells in the same row are conditional on the boundary cell being fixed.
 - **The bootstrap likelihood-ratio test** resolves p-values only to `1 / (n_boot + 1)`
   and, like the information criteria, assumes that the ``K``-class model is correctly
   specified; use several hundred replicates when the p-value is near the threshold, and

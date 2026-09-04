@@ -28,8 +28,10 @@ All notable changes to this project are documented in this file. The format foll
   `informationmatrix` read them; `profiles` fills its `se`/`lower`/`upper` columns by the
   delta method (logit-scale intervals) and `profiles(m; classes=true)` prepends the class
   sizes; `show_profiles` prints `±se`. Parameters on the boundary (a probability within
-  1e-6 of 0 or 1) get `NaN` standard errors with a warning, as does the whole matrix when
-  the observed information is not positive definite or the coefficients diverged.
+  1e-6 of 0 or 1) are held fixed and get `NaN` standard errors with a warning; the other
+  cells of a row with a boundary cell keep standard errors conditional on it being
+  fixed. The whole matrix is `NaN` when the observed information is not positive
+  definite or the coefficients diverged.
 - `aic`, `bic` and `aicc` have explicit, documented methods for `LCAModel`.
 - Covariates on class membership (latent class regression): `prepare_data(table, items;
   covariates=[:age, :female])` or `LCAData(y; covariates=X)` and `fit(LCAModel, d, k)`

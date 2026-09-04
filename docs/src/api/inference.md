@@ -1,64 +1,12 @@
-# API reference
+# [API: inference, bootstrap, deprecated](@id api-inference)
 
-The sections below follow the workflow: prepare the data, fit, inspect the fit
-statistics, predict, and read the profiles. Every function and type listed under a
-section heading is exported by `LatentClassAnalysis`, except where noted. The
+Standard errors and confidence intervals, simulation and the bootstrap, the deprecated
+0.2 names, and the unexported internals. The first page,
+[API: data, fitting, prediction](@ref api-core), covers preparing the data, fitting,
+the fit statistics, prediction and the profiles. Every function and type listed under
+a section heading is exported by `LatentClassAnalysis`, except where noted; the
 [Internals](@ref) section documents unexported helpers that are useful to know about
 but may change between minor versions.
-
-## Data
-
-```@docs
-prepare_data(::Any, ::AbstractVector{<:Union{Symbol,AbstractString}})
-LCAData
-hasmissing
-nmissing
-hascovariates
-```
-
-## Fitting
-
-```@docs
-fit
-LCAOptions
-LatentClassAnalysis.FitFlags
-```
-
-## Model
-
-```@docs
-LCAModel
-```
-
-## Fit statistics
-
-```@docs
-nobs
-dof
-loglikelihood
-isfitted
-aic
-bic
-aicc
-sbic
-entropy
-diagnostics
-ModelDiagnostics
-```
-
-## Prediction
-
-```@docs
-predict
-classify
-```
-
-## Profiles
-
-```@docs
-profiles(::LCAModel)
-show_profiles
-```
 
 ## Standard errors
 

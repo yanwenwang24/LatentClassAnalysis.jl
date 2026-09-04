@@ -502,7 +502,11 @@ of [`profiles`](@ref profiles(::LCAModel)) (`item`, `level`, `class`, `prob`, `s
 back to probabilities, so that `se` is the standard deviation of the replicate
 probabilities and `lower`/`upper` are their `(1 - level)/2` and `1 - (1 - level)/2`
 percentiles (which lie within `[0, 1]` without any transformation). Replicates with a
-non-finite coefficient are left out.
+non-finite coefficient are left out. No cell is held fixed: a probability on the
+boundary gets the standard deviation and percentiles of its replicates like any other
+cell, so the boundary rules of the delta method in `profiles(m)` (a `NaN` standard
+error for the boundary cell, conditional standard errors for the rest of its row) do
+not apply here.
 
 With `classes=true` the table starts with one row per class holding its size; for a
 model with covariates the replicate class sizes are the sample averages of the
