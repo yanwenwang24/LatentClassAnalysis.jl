@@ -11,6 +11,7 @@ url: "https://yanwenwang24.github.io/LatentClassAnalysis.jl"
 license: MIT
 version: 0.3.1
 date-released: "2026-09-04"
+doi: 10.5281/zenodo.22309542
 keywords:
   - latent class analysis
   - finite mixture models

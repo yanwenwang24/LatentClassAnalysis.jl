@@ -112,17 +112,19 @@ same generator and the same data always give the same model.
 
 ## Citing
 
-If you use LatentClassAnalysis.jl in published work, please cite the software; the
-`CITATION.cff` file in the repository carries the metadata, and GitHub's "Cite this
-repository" button formats it. Add the version you used:
+If you use LatentClassAnalysis.jl in published work, please cite the software. Every
+release is archived on Zenodo; the DOI below is the concept DOI, which always resolves to
+the latest version, and each release also has its own. The `CITATION.cff` file in the
+repository carries the metadata, and GitHub's "Cite this repository" button formats it.
+Add the version you used:
 
 ```bibtex
 @software{wang_latentclassanalysis_jl,
-  author  = {Wang, Yanwen},
-  title   = {{LatentClassAnalysis.jl}: Latent class analysis in {Julia}},
-  url     = {https://github.com/yanwenwang24/LatentClassAnalysis.jl},
-  version = {0.3.0},
-  year    = {2026}
+  author = {Wang, Yanwen},
+  title  = {{LatentClassAnalysis.jl}: Latent class analysis in {Julia}},
+  url    = {https://github.com/yanwenwang24/LatentClassAnalysis.jl},
+  doi    = {10.5281/zenodo.22309542},
+  year   = {2026}
 }
 ```
 

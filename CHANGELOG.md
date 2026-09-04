@@ -6,6 +6,11 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+### Added
+- Releases are archived on Zenodo (from 0.3.1 on); the concept DOI
+  10.5281/zenodo.22309542 is in `CITATION.cff`, the README badge and the citation
+  entries of the documentation.
+
 ## [0.3.1] - 2026-09-04
 
 ### Changed

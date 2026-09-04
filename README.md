@@ -5,6 +5,7 @@
 [![CI](https://github.com/yanwenwang24/LatentClassAnalysis.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/yanwenwang24/LatentClassAnalysis.jl/actions/workflows/CI.yml)
 [![Coverage](https://codecov.io/gh/yanwenwang24/LatentClassAnalysis.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/yanwenwang24/LatentClassAnalysis.jl)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22309542.svg)](https://doi.org/10.5281/zenodo.22309542)
 
 Latent class analysis (LCA) in Julia.
 
@@ -133,17 +134,18 @@ lists every old call next to its replacement and explains what changed in the re
 
 ## Citing
 
-If you use this package, please cite the software (GitHub's "Cite this repository"
-button generates the reference from [CITATION.cff](CITATION.cff); add the version you
-used):
+If you use this package, please cite the software. Every release is archived on Zenodo;
+the DOI below is the concept DOI, which always resolves to the latest version, and each
+release also has its own. GitHub's "Cite this repository" button generates the reference
+from [CITATION.cff](CITATION.cff); add the version you used:
 
 ```bibtex
 @software{wang_latentclassanalysis_jl,
-  author  = {Wang, Yanwen},
-  title   = {{LatentClassAnalysis.jl}: Latent class analysis in {Julia}},
-  url     = {https://github.com/yanwenwang24/LatentClassAnalysis.jl},
-  version = {0.3.0},
-  year    = {2026}
+  author = {Wang, Yanwen},
+  title  = {{LatentClassAnalysis.jl}: Latent class analysis in {Julia}},
+  url    = {https://github.com/yanwenwang24/LatentClassAnalysis.jl},
+  doi    = {10.5281/zenodo.22309542},
+  year   = {2026}
 }
 ```
 
