@@ -27,7 +27,9 @@ jobs:
       - name: Run CompatHelper
         run: |
           import CompatHelper
-          CompatHelper.main(; subdirs = ["", "docs", "test", "examples"])
+          # docs/ and examples/ are left out on purpose: they develop the package itself
+          # and must not get a compat entry for it (see CLAUDE.md)
+          CompatHelper.main(; subdirs = ["", "test"])
         shell: julia --color=yes {0}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -40,7 +40,8 @@ println(d)
 # ---------------------------------------------------------------------------------------
 # Every fit runs 20 random starts and continues the 4 best to convergence; pass an rng
 # for a reproducible result. Fits with too many classes typically print a warning about
-# response probabilities on the boundary (0 or 1).
+# response probabilities on the boundary (0 or 1), or that the best log-likelihood was
+# found by a single start (the cue to refit with more starts, as done for the test below).
 models = fit(LCAModel, d, 1:4; rng = StableRNG(1))
 
 selection = DataFrame(diagnostics(models))
@@ -62,14 +63,18 @@ show_profiles(best)
 println(first(DataFrame(profiles(best; classes = true)), 6))
 
 # The free parameters on the logit scale, with standard errors, Wald tests and intervals
-# (which = :class restricts the table to the class-membership block)
+# (which = :items restricts the table to the item-response logits; which = :class gives
+# the class-membership block)
 println("\nResponse logits with standard errors:")
 display(coeftable(best; which = :items))
 
 # Is a third class more than chance? Bootstrap likelihood-ratio test of 2 against 3
-# classes (models[k] has k classes; 19 replicates resolve the 5% level)
+# classes (models[k] has k classes). The default 20 starts did not replicate the
+# three-class maximum on these data, so that model is refitted with more starts first;
+# 19 replicates resolve the 5% level.
+m3 = fit(LCAModel, d, 3; rng = StableRNG(1), n_starts = 50, n_final = 10)
 println("\nBootstrap likelihood-ratio test:")
-println(bootstrap_lrt(models[2], models[3]; n_boot = 19, rng = StableRNG(2)))
+println(bootstrap_lrt(models[2], m3; n_boot = 19, rng = StableRNG(2)))
 
 # Posterior membership probabilities and modal class assignments
 posterior = predict(best)

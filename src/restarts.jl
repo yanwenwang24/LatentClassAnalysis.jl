@@ -91,7 +91,10 @@ function _normalize_init!(θ::LCAParams)
         (all(isfinite, P) && all(>=(0), P)) ||
             throw(ArgumentError("init item probabilities must be finite and non-negative"))
         for k in 1:size(P, 1)
-            sum(view(P, k, :)) > 0 || throw(ArgumentError("init item probabilities must not have an all-zero row"))
+            row = view(P, k, :)
+            s = sum(row)
+            s > 0 || throw(ArgumentError("init item probabilities must not have an all-zero row"))
+            row ./= s          # normalize before flooring, or [3, 1] would clamp to [1, 1]
             _floor_row!(P, k)
         end
     end
@@ -126,9 +129,20 @@ function _as_params(m::LCAModel, ws::LCAWorkspace)
             "init model has $(size(m.beta, 1) - 1) covariates but the data has $(P - 1)"))
         all(isfinite, m.beta) || throw(ArgumentError("init model has non-finite covariate coefficients"))
         # Raw-scale coefficients (class 1 as reference) to the standardized scale
-        θ.coefs = ws.A \ hcat(zeros(P), m.beta)
+        θ.coefs = ws.A \ _raw_coefs(m)
     end
     return _seed_coefs!(θ, ws)
+end
+
+# An init model fitted on other covariates would seed the slopes of the wrong columns.
+function _check_init_covariates(init, d::LCAData, covariates::Bool)
+    covariates || return nothing
+    for m in (init isa AbstractVector ? init : (init,))
+        m isa LCAModel && hascovariates(m) && m.data.covariate_names != d.covariate_names &&
+            throw(ArgumentError("the init model was fitted with the covariates " *
+                                "$(m.data.covariate_names[2:end]) but the data has $(d.covariate_names[2:end])"))
+    end
+    return nothing
 end
 
 function _as_params(θ::LCAParams, ws::LCAWorkspace)

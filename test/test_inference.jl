@@ -106,7 +106,11 @@ end
         @test layb.ref_cat[1][2] == 2
         @test !layb.free[LCA._row_indices(layb, 1, 2)[1]]
         @test !layb.free[2] && layb.free[1]
-        @test count(!, layb.free) == 2
+        # Fixed: the boundary cell, the log-odds of the (empty) class 3, and every response
+        # logit of class 3
+        @test count(!, layb.free) == 2 + sum(d.n_categories .- 1)
+        @test all(!any(layb.free[LCA._row_indices(layb, j, 3)]) for j in 1:length(d.n_categories))
+        @test all(all(layb.free[LCA._row_indices(layb, j, 1)]) for j in 1:length(d.n_categories))
         vb = LCA._pack(θb, layb)
         θbc = copy(θb)
         LCA._unpack!(θbc, vb, layb)
@@ -530,7 +534,7 @@ end
         @test all(isnan(r.se) for r in profiles(msep))
         @test length(coeftable(msep)) == dof(msep)
         @test occursin("NaN for $(dof(msep)) of $(dof(msep))", sprint(show, msep))
-        @test sprint(io -> show_profiles(msep; io=io)) isa String
+        @test count("±NaN", sprint(io -> show_profiles(msep; io=io))) == 2 + 8 * 2 * 2
     end
 
     @testset "Not positive definite" begin
@@ -546,11 +550,81 @@ end
         @test !isposdef(Symmetric(informationmatrix(mnp)))
         @test all(isnan(r.se) for r in profiles(mnp))
         @test occursin("NaN for $(dof(mnp)) of $(dof(mnp))", sprint(show, mnp))
-        # The warning message of a failed factorization
+        # The covariance kernel at the fitted parameters: positive definite, nothing masked
         ws, θ, layout = LCA._model_params(m2)
-        V, posdef = LCA._covariance(LCA._pack(θ, layout), layout, ws)
-        @test posdef && all(isfinite, V)
+        V, posdef, n_zero = LCA._covariance(LCA._pack(θ, layout), layout, ws)
+        @test posdef && all(isfinite, V) && n_zero == 0
         @test V ≈ m2.vcov
+    end
+
+    @testset "Empty class: its response parameters are held fixed" begin
+        # A third class of size exactly zero contributes nothing to the likelihood, so the
+        # score of its response logits is identically zero and their observed information
+        # is zero. The layout holds them fixed (like boundary parameters) and the
+        # covariance matrix of the two real classes is unchanged, instead of the whole
+        # matrix being NaN because the information matrix is singular.
+        θe = LCA.LCAParams([m2.class_probs; 0.0],
+                           [vcat(B, fill(0.5, 1, 2)) for B in m2.item_probs], nothing)
+        wse = LCA.LCAWorkspace(d2, 3)
+        laye = LCA.ParamLayout(θe.class_probs, θe.item_probs, nothing)
+        @test laye.n_total == dof(m2) + 1 + 6
+        @test laye.free[1] && !laye.free[2]                     # class 3 is on the boundary
+        rows3 = [LCA._row_indices(laye, j, 3) for j in 1:6]
+        @test all(!any(laye.free[r]) for r in rows3)
+        @test all(all(laye.free[LCA._row_indices(laye, j, k)]) for j in 1:6, k in 1:2)
+        @test LCA._fixed_counts(θe.class_probs, laye) == (1, 6)     # log(π3/π1) is on the boundary
+        fixed = vcat(2, rows3...)
+        keep = setdiff(1:laye.n_total, fixed)
+        Ve, msgs = LCA._fit_vcov(θe, wse, LCA.LCAOptions(), false)
+        # Two messages: the log-odds of the empty class is on the boundary, and its
+        # response parameters are not estimable
+        @test length(msgs) == 2
+        @test occursin("1 parameter is on the boundary (0 or 1)", msgs[1])
+        @test occursin("the 6 response parameters of the empty class(es) are not estimable", msgs[2])
+        @test all(isnan, Ve[fixed, :]) && all(isnan, Ve[:, fixed])
+        @test all(isfinite, Ve[keep, keep])
+        # keep lists log(π2/π1) and then, per item, the class-1 and class-2 logits: the
+        # order of the two-class layout
+        @test Ve[keep, keep] ≈ vcov(m2) rtol = 1e-6
+
+        # The zero-information safety net catches the same parameters when the layout
+        # leaves them free
+        laye2 = LCA.ParamLayout(θe.class_probs, θe.item_probs, nothing)
+        for r in rows3
+            laye2.free[r] .= true
+        end
+        V2, posdef2, n_zero2 = LCA._covariance(LCA._pack(θe, laye2), laye2, wse)
+        @test posdef2 && n_zero2 == 6
+        @test all(!any(laye2.free[r]) for r in rows3)
+        @test all(isnan, V2[fixed, :]) && all(isnan, V2[:, fixed])
+        @test V2[keep, keep] ≈ Ve[keep, keep]
+        @test LCA._informative([1.0 0.0; 0.0 0.0]) == [true, false]
+        @test LCA._informative([1e3 0.0; 0.0 1e-10]) == [true, false]
+        @test LCA._informative([1e3 0.0; 0.0 1e-8]) == [true, true]
+        @test LCA._informative([NaN 0.0; 0.0 1.0]) == [true, true]     # reported as not positive definite
+        @test LCA._informative(zeros(2, 2)) == [false, false]
+
+        # Through fit: a start with an empty third class stays empty. The fit warns once,
+        # the empty class's parameters have NaN standard errors and every other parameter
+        # keeps the standard error of the two-class model.
+        init3 = (class_probs=[0.6, 0.4, 0.0],
+                 item_probs=[vcat(B, fill(0.5, 1, 2)) for B in m2.item_probs])
+        m3 = @test_logs (:warn, r"empty class\(es\) \[3\].*response parameters of the empty class") match_mode = :any fit(
+            LCAModel, d2, 3; rng=StableRNG(1), init=init3, n_starts=1)
+        @test m3.flags.empty_classes == [3]
+        lay3 = LCA.ParamLayout(m3)
+        fixed3 = findall(!, lay3.free)
+        free3 = findall(lay3.free)
+        @test length(fixed3) == 1 + 6
+        V3 = vcov(m3)
+        @test all(isnan, V3[fixed3, :]) && all(isnan, V3[:, fixed3])
+        @test all(isfinite, V3[free3, free3])
+        @test V3[free3, free3] ≈ vcov(m2) rtol = 1e-4
+        @test occursin("NaN for 7 of $(dof(m3)) parameters", sprint(show, m3))
+        prof3 = profiles(m3; classes=true)
+        @test all(isnan(r.se) for r in prof3 if r.class == 3)
+        @test all(isfinite(r.se) for r in prof3 if r.class < 3)
+        @test count("±NaN", sprint(io -> show_profiles(m3; io=io))) == 1 + 12
     end
 
     @testset "se = :none" begin
@@ -615,4 +689,28 @@ end
         @test count("±NaN", outc) == 3
         @test occursin(r"^1:\s+\d+\.\d{3}% ±\d+\.\d{3}"m, outc)
     end
+end
+
+@testset "boundary parameters with covariates" begin
+    rng = StableRNG(63)
+    n = 500
+    x = randn(rng, n)
+    z = [rand(rng) < 1 / (1 + exp(-(0.3 + 0.8 * x[i]))) ? 2 : 1 for i in 1:n]
+    y = Matrix{Int}(undef, n, 5)
+    for i in 1:n, j in 1:5
+        p = z[i] == 1 ? (j == 1 ? 1.0 : 0.85) : 0.15        # item 1 reveals class 1 exactly
+        y[i, j] = rand(rng) < p ? 1 : 2
+    end
+    d = LCAData(y; n_categories=fill(2, 5), covariates=x, covariate_names=[:x])
+    m = @test_logs (:warn, r"on the boundary") match_mode = :any fit(LCAModel, d, 2; rng=StableRNG(1), n_starts=4, n_final=2)
+    free = LCA.ParamLayout(m).free
+    @test !all(free) && all(free[1:2])                        # the class block is always free
+    V = vcov(m)
+    @test all(isfinite, V[free, free])
+    @test all(isnan, V[.!free, :]) && all(isnan, V[:, .!free])
+    @test informationmatrix(m)[free, free] * V[free, free] ≈ I atol = 1e-6
+    ct = coeftable(m; which=:class)
+    @test length(ct.rownms) == 2 && all(isfinite, ct.cols[2])
+    @test coeftable(m; level=0.57).colnms[5] == "Lower 57%"
+    @test LCA._level_string(0.57) == "57" && LCA._level_string(0.995) == "99.5" && LCA._level_string(0.9) == "90"
 end

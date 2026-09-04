@@ -46,11 +46,13 @@ StatsAPI.bic(m::LCAModel) = -2 * loglikelihood(m) + dof(m) * log(nobs(m))
 """
     aicc(m::LCAModel) -> Float64
 
-Corrected AIC for small samples, `aic(m) + 2·dof·(dof + 1) / (nobs - dof - 1)`.
+Corrected AIC for small samples, `aic(m) + 2·dof·(dof + 1) / (nobs - dof - 1)`; `NaN`
+when `nobs ≤ dof + 1`, where the correction is undefined.
 """
 function StatsAPI.aicc(m::LCAModel)
     k = dof(m)
     n = nobs(m)
+    n - k - 1 > 0 || return NaN
     return aic(m) + 2 * k * (k + 1) / (n - k - 1)
 end
 

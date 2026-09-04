@@ -67,7 +67,7 @@ const LCA = LatentClassAnalysis
         @test hasmissing(dm) && nmissing(dm) == [0, N ÷ 2, 0, 0, 10, 0]
         @test dm.y[.!mask] == d_sim.y[.!mask]
         @test all(iszero, dm.y[mask])
-        @test_throws DimensionMismatch simulate(m, 10; missing_mask=falses(5, 6))
+        @test_throws ArgumentError simulate(m, 10; missing_mask=falses(5, 6))
         @test_throws ArgumentError simulate(m, 0)
         @test_throws ArgumentError simulate(m, 10; X=randn(StableRNG(1), 10))    # no covariates in the model
         # The training missingness pattern
@@ -95,10 +95,10 @@ const LCA = LatentClassAnalysis
         @test simulate(mc, N; rng=StableRNG(14), X=reshape(xs, :, 1)).y == dcs.y
         @test simulate(mc; rng=StableRNG(1)).X == dc.X                 # n == nobs reuses the design
         @test_throws ArgumentError simulate(mc, 10)                    # n ≠ nobs needs X
-        @test_throws DimensionMismatch simulate(mc, 10; X=randn(StableRNG(1), 5))
-        @test_throws DimensionMismatch simulate(mc, 10; X=randn(StableRNG(1), 10, 2))
+        @test_throws ArgumentError simulate(mc, 10; X=randn(StableRNG(1), 5))
+        @test_throws ArgumentError simulate(mc, 10; X=randn(StableRNG(1), 10, 2))
         @test_throws ArgumentError simulate(mc, 10; X=[NaN; randn(StableRNG(1), 9)])
-        @test_throws DimensionMismatch LCA._simulate(StableRNG(1), mc, 10, randn(StableRNG(1), 10, 3), nothing)
+        @test_throws ArgumentError LCA._simulate(StableRNG(1), mc, 10, randn(StableRNG(1), 10, 3), nothing)
         @test_throws ArgumentError LCA._simulate(StableRNG(1), mc, 10, nothing, nothing)
         # Predictions on the simulated data use its covariates
         @test size(predict(mc, dcs)) == (N, 2)
@@ -320,7 +320,8 @@ const LCA = LatentClassAnalysis
         yr, _ = simulate_lca(StableRNG(40), 60, TWO_CLASS_PROBS, TWO_CLASS_ITEMS)
         xr = zeros(60)
         xr[1:2] .= 1
-        mr = fit(LCAModel, LCAData(yr; covariates=xr), 2; rng=StableRNG(1), n_starts=2, n_final=1, se=:none)
+        mr = @test_logs (:warn, r"on the boundary") match_mode = :any fit(
+            LCAModel, LCAData(yr; covariates=xr), 2; rng=StableRNG(1), n_starts=2, n_final=1, se=:none)
         br = @test_logs (:warn, r"replicate fit\(s\) failed") match_mode = :any bootstrap(mr; n_boot=20, rng=StableRNG(41))
         @test any(isnan, br.coefs) && !all(br.converged)
         @test all(i -> all(isnan, br.coefs[i, :]) || all(isfinite, br.coefs[i, :]), 1:20)
@@ -341,7 +342,8 @@ const LCA = LatentClassAnalysis
     @testset "bootstrap_lrt" begin
         # (a two-class fit to data from one class converges sublinearly, so replicate fits
         # may hit max_iter; that is warned about and does not affect the statistics)
-        t = bootstrap_lrt(m1, m; n_boot=5, rng=StableRNG(41))
+        nonconv = (:warn, r"replicate fits did not converge")
+        t = @test_logs nonconv match_mode = :any bootstrap_lrt(m1, m; n_boot=5, rng=StableRNG(41))
         @test t isa BootstrapLRT
         @test t.null === m1 && t.alternative === m
         @test t.statistic == 2 * (loglikelihood(m) - loglikelihood(m1))
@@ -354,14 +356,16 @@ const LCA = LatentClassAnalysis
         @test all(0 .<= t.replicates .< 30)
 
         # Reproducible; threads agree with the serial run
-        t2 = bootstrap_lrt(m1, m; n_boot=5, rng=StableRNG(41))
+        t2 = @test_logs nonconv match_mode = :any bootstrap_lrt(m1, m; n_boot=5, rng=StableRNG(41))
         @test t2.replicates == t.replicates && t2.pvalue == t.pvalue
-        tt = bootstrap_lrt(m1, m; n_boot=5, rng=StableRNG(41), multithreaded=true)
+        tt = @test_logs nonconv match_mode = :any bootstrap_lrt(m1, m; n_boot=5, rng=StableRNG(41), multithreaded=true)
         @test tt.replicates == t.replicates
-        @test bootstrap_lrt(m1, m; n_boot=5, rng=StableRNG(42)).replicates != t.replicates
+        t42 = @test_logs nonconv match_mode = :any bootstrap_lrt(m1, m; n_boot=5, rng=StableRNG(42))
+        @test t42.replicates != t.replicates
 
         # 2 vs 3 on two-class data
-        m3 = fit(LCAModel, d, 3; rng=StableRNG(1), n_starts=8, n_final=4, se=:none)
+        m3 = @test_logs (:warn, r"on the boundary") match_mode = :any fit(
+            LCAModel, d, 3; rng=StableRNG(1), n_starts=8, n_final=4, se=:none)
         t23 = bootstrap_lrt(m, m3; n_boot=5, rng=StableRNG(43))
         @test all(t23.replicates .>= -1e-6) && t23.n_negative == 0
         @test 0 < t23.pvalue <= 1
@@ -429,7 +433,7 @@ const LCA = LatentClassAnalysis
         @test tmiss.pvalue == 1 / 4
     end
 
-    if get(ENV, "LCA_SLOW_TESTS", "true") == "true"
+    if lowercase(get(ENV, "LCA_SLOW_TESTS", "true")) in ("true", "1", "yes")
         @testset "slow: bootstrap versus observed-information standard errors" begin
             b = bootstrap(m; n_boot=100, rng=StableRNG(51))
             @test all(b.converged)
@@ -478,10 +482,14 @@ end
     _, m = Test.collect_test_logs(() -> fit(LCAModel, d, 2; rng=StableRNG(1)))
     free = LatentClassAnalysis.ParamLayout(m).free
     @test !all(free)
-    _, b = Test.collect_test_logs(() -> bootstrap(m; n_boot=10, rng=StableRNG(2)))
+    b = @test_logs (:warn, r"on the boundary or an empty class") match_mode = :any bootstrap(m; n_boot=10, rng=StableRNG(2))
     se = stderror(b)
     @test all(isnan, se[.!free])
     @test all(isfinite, se[free])
+    # The printed summary covers the finite standard errors and counts the boundary ones
+    sb = sprint(show, b)
+    @test occursin("bootstrap standard errors of $(count(free)) parameters", sb)
+    @test occursin("(NaN for $(count(.!free)) parameter$(count(.!free) == 1 ? "" : "s") on the boundary)", sb)
     ci = confint(b)
     @test all(isnan, ci[.!free, :])
     @test all(isfinite, ci[free, :])
@@ -491,4 +499,31 @@ end
     # the probability-scale summary is not masked
     pr = profiles(b)
     @test all(r -> isfinite(r.prob), pr)
+end
+
+@testset "exact label assignment for 4 to 7 classes" begin
+    # Branch-and-bound assignment against brute force over all permutations
+    for K in 4:7
+        D = rand(StableRNG(100 + K), K, K)
+        perms = _permutations(collect(1:K))
+        best = perms[argmin([sum(D[k, p[k]] for k in 1:K) for p in perms])]
+        @test LCA._assignment(D) == best
+    end
+end
+
+@testset "parametric bootstrap and BLRT with covariates and missing data" begin
+    rng = StableRNG(64)
+    n = 300
+    x = randn(rng, n)
+    y, _ = simulate_lca_reg(rng, hcat(ones(n), x), reshape([0.3, 0.8], 2, 1), TWO_CLASS_ITEMS)
+    mcar!(rng, y, 0.15)
+    d = LCAData(y; n_categories=fill(2, 6), covariates=x, covariate_names=[:x])
+    _, m = Test.collect_test_logs(() -> fit(LCAModel, d, 2; rng=StableRNG(1), n_starts=2, n_final=1, se=:none))
+    ds = simulate(m, n; rng=StableRNG(2), X=x, missing_mask=iszero.(d.y))
+    @test nmissing(ds) == nmissing(d) && hascovariates(ds) && ds.X == d.X
+    _, b = Test.collect_test_logs(() -> bootstrap(m; n_boot=3, rng=StableRNG(3), parametric=true))
+    @test size(b.coefs) == (3, dof(m)) && all(isfinite, b.coefs)
+    _, m1 = Test.collect_test_logs(() -> fit(LCAModel, d, 1))
+    _, t = Test.collect_test_logs(() -> bootstrap_lrt(m1, m; n_boot=2, rng=StableRNG(4)))
+    @test length(t.replicates) == 2 && all(isfinite, t.replicates)
 end

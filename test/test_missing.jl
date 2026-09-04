@@ -62,7 +62,7 @@ const LCA = LatentClassAnalysis
         d_rest = LCAData(y[2:n-1, :])
         @test loglikelihood(mr, dr) ≈ loglikelihood(mr, d_rest)
         # The same holds for prediction on new data
-        pnew = predict(mr, LCAData([0 0 0 0 0 0; 1 2 1 2 1 2]; n_categories=fill(2, 6)))
+        pnew = predict(mr, LCAData([0 0 0 0 0 0; 1 2 1 2 1 2; 2 1 2 1 2 1]; n_categories=fill(2, 6)))
         @test maximum(abs.(pnew[1, :] .- mr.class_probs)) < 1e-12
         @test classify(mr, LCAData([0 0 0 0 0 0]; n_categories=fill(2, 6))) == [1]  # largest class
     end

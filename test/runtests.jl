@@ -3,7 +3,7 @@ using LatentClassAnalysis
 
 include("testutils.jl")
 
-@testset "LatentClassAnalysis.jl" begin
+@testset verbose = true "LatentClassAnalysis.jl" begin
     include("test_aqua.jl")
     include("test_data.jl")
     include("test_em.jl")

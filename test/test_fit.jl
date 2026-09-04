@@ -1,6 +1,7 @@
 using Test
 using LatentClassAnalysis
 using DataFrames
+using Random
 using StableRNGs
 using Statistics
 
@@ -142,7 +143,10 @@ const LCA = LatentClassAnalysis
     end
 
     @testset "Several class counts and the table method" begin
-        models = fit(LCAModel, d, 2:4; rng=StableRNG(1), n_starts=4, n_final=2)
+        # (the 3- and 4-class fits to two-class data warn about non-replicated maxima,
+        # boundary probabilities or non-convergence)
+        models = @test_logs (:warn, r"3-class fit") (:warn, r"4-class fit") match_mode = :any fit(
+            LCAModel, d, 2:4; rng=StableRNG(1), n_starts=4, n_final=2)
         @test models isa Vector{LCAModel}
         @test [m.n_classes for m in models] == [2, 3, 4]
         @test all(issorted(m.class_probs; rev=true) for m in models)
@@ -153,7 +157,7 @@ const LCA = LatentClassAnalysis
         # calling fit repeatedly with the same generator
         rng = StableRNG(1)
         m2 = fit(LCAModel, d, 2; rng=rng, n_starts=4, n_final=2)
-        m3 = fit(LCAModel, d, 3; rng=rng, n_starts=4, n_final=2)
+        m3 = @test_logs (:warn, r"3-class fit") match_mode = :any fit(LCAModel, d, 3; rng=rng, n_starts=4, n_final=2)
         @test same_fit(m2, models[1]) && same_fit(m3, models[2])
 
         # Table convenience method equals prepare_data + fit
@@ -163,11 +167,16 @@ const LCA = LatentClassAnalysis
         mp = fit(LCAModel, prepare_data(df, items), 2; rng=StableRNG(1))
         @test same_fit(mt, mp)
         @test mt.data.item_names == items
-        mts = fit(LCAModel, df, items, 2:3; rng=StableRNG(1), n_starts=2, n_final=1)
+        mts = @test_logs (:warn, r"3-class fit") match_mode = :any fit(
+            LCAModel, df, items, 2:3; rng=StableRNG(1), n_starts=2, n_final=1)
         @test mts isa Vector{LCAModel} && length(mts) == 2
         mtn = fit(LCAModel, (x1=y[:, 1], x2=y[:, 2], x3=y[:, 3], x4=y[:, 4], x5=y[:, 5], x6=y[:, 6]),
                   items, 2; rng=StableRNG(1))
         @test same_fit(mtn, mp)
+        # levels and drop_unused_levels are passed through to prepare_data
+        lv = Dict(:x1 => [2, 1])
+        @test same_fit(fit(LCAModel, df, items, 2; levels=lv, rng=StableRNG(1)),
+                       fit(LCAModel, prepare_data(df, items; levels=lv), 2; rng=StableRNG(1)))
         @test_throws ArgumentError fit(LCAModel, df, [:zzz], 2)
         @test_throws ArgumentError fit(LCAModel, y, items, 2)   # a matrix is not a table
         @test_throws MethodError fit(LCAModel, y, 2)            # no matrix entry point
@@ -213,10 +222,17 @@ const LCA = LatentClassAnalysis
         @test length(mv2.start_loglik) == 3
         @test mv2.start_loglik[1] ≈ m.loglik rtol = 1e-10
 
-        # Unnormalized starts are normalized; invalid starts are rejected
+        # Unnormalized starts are normalized (row by row, before the floor is applied) and
+        # reach the same optimum; invalid starts are rejected
+        θu = LCA._normalize_init!(LCA.LCAParams([2.0, 2.0], [[3.0 1.0; 1.0 3.0]], nothing))
+        @test θu.class_probs ≈ [0.5, 0.5] && θu.item_probs[1] ≈ [0.75 0.25; 0.25 0.75]
         mu = fit(LCAModel, d, 2; rng=StableRNG(1), n_starts=1,
                  init=(class_probs=[2.0, 2.0], item_probs=[[3.0 1.0; 1.0 3.0] for _ in 1:6]))
         @test mu.converged
+        @test mu.loglik ≈ m.loglik rtol = 1e-8
+        @test_throws ArgumentError LCA._normalize_init!(LCA.LCAParams([1.0, 1.0], [[0.0 0.0; 0.5 0.5]], nothing))
+        @test_throws ArgumentError LCA._normalize_init!(LCA.LCAParams([1.0, 1.0], [[-1.0 2.0; 0.5 0.5]], nothing))
+        @test_throws ArgumentError LCA._normalize_init!(LCA.LCAParams([0.0, 0.0], [[0.5 0.5; 0.5 0.5]], nothing))
         @test_throws ArgumentError fit(LCAModel, d, 3; init=m)                      # wrong K
         @test_throws ArgumentError fit(LCAModel, d, 2; init=(class_probs=[0.5, 0.5],))
         @test_throws ArgumentError fit(LCAModel, d, 2; init=(class_probs=[0.5, 0.5], item_probs=[[0.5 0.5]]))
@@ -275,7 +291,7 @@ const LCA = LatentClassAnalysis
         yb[:, 1] = classes
         mb = @test_logs (:warn, r"item-response probabilities are on the boundary") fit(LCAModel, LCAData(yb), 2; rng=StableRNG(1), n_starts=4, n_final=2)
         @test mb.flags.n_boundary >= 2
-        @test !LCA._clean(mb.flags)
+        @test !clean_flags(mb.flags)
         @test all(x -> x <= 1e-6 || x >= 1 - 1e-6, mb.item_probs[1])
         @test all(all(P .>= 1e-10) for P in mb.item_probs)   # floored, never exactly zero
         @test isfinite(mb.loglik)
@@ -298,6 +314,28 @@ const LCA = LatentClassAnalysis
         @test occursin("only one of the continued starts", msgs[4])
         @test occursin("separation", msgs[5])
         @test isempty(LCA._flag_messages(LCA.FitFlags(true, 0, Int[], true, false)))
-        @test LCA._clean(LCA.FitFlags(true, 0, Int[], true, false))
+        @test clean_flags(LCA.FitFlags(true, 0, Int[], true, false))
     end
+end
+
+@testset "nothing touches the global RNG" begin
+    y, _ = simulate_lca(StableRNG(70), 200, TWO_CLASS_PROBS, TWO_CLASS_ITEMS)
+    d = LCAData(y)
+    r0 = copy(Random.default_rng())
+    m = fit(LCAModel, d, 2; rng=StableRNG(1), n_starts=2, n_final=1, se=:none)
+    simulate(m, 20; rng=StableRNG(2))
+    Test.collect_test_logs(() -> bootstrap(m; n_boot=2, rng=StableRNG(3)))
+    @test copy(Random.default_rng()) == r0
+end
+
+@testset "flag messages and unobserved items" begin
+    @test LCA._flag_messages(LCA.FitFlags(false, 0, Int[], true, false)) == ["EM did not converge"]
+    @test isempty(LCA._flag_messages(LCA.FitFlags(true, 0, Int[], true, false)))
+    # An item without a single observed response keeps uniform probabilities, is named in
+    # the warning, and gets NaN standard errors while the other item keeps its own
+    y0 = [1 0; 2 0; 1 0; 2 0; 1 0; 1 0]
+    d0 = LCAData(y0; n_categories=[2, 2])
+    m0 = @test_logs (:warn, r"item\(s\) \[:item2\] have no observed responses.*zero observed information") fit(LCAModel, d0, 1)
+    @test m0.item_probs[2] == [0.5 0.5]
+    @test isfinite(vcov(m0)[1, 1]) && isnan(vcov(m0)[2, 2])
 end

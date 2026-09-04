@@ -18,7 +18,7 @@ the guide pages: [Model selection](@ref guide-model-selection),
 |:----|:----|
 | `using LatentClassAnalysis, DataFrames` | `using LatentClassAnalysis` — DataFrames is no longer loaded by the package; add `using DataFrames` yourself if you use it |
 | `data, n_categories = prepare_data(df, :a, :b, :c)` | `d = prepare_data(df, [:a, :b, :c])` returns an [`LCAData`](@ref); the codes are `d.y`, the category counts `d.n_categories` |
-| `prepare_data(df, cols...; zero_based = [...])` | keyword removed; codes are always `1, 2, …, C_j` |
+| `prepare_data(df, cols...; zero_based = [...])` | `zero_based` is ignored (the deprecated varargs form still accepts it; the new form has no such keyword); codes are always `1, 2, …, C_j` |
 | a `DataFrame` argument | any Tables.jl table (`DataFrame`, `NamedTuple` of vectors, Arrow table, ...) |
 | a `Matrix{Int}` of codes | `LCAData(y)` or `LCAData(y; n_categories = [...])` |
 | `Random.seed!(1)` before constructing the model | `rng = StableRNG(1)` (or `Random.Xoshiro(1)`) passed to `fit` |

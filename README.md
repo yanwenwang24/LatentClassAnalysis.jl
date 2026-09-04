@@ -9,7 +9,7 @@
 Latent class analysis (LCA) in Julia.
 
 LCA identifies unobserved subgroups in a population from patterns of categorical
-responses. Typical uses are behavioral profiles, market segments, and life-course
+responses. Typical uses are behavioural profiles, market segments, and life-course
 pathways. LatentClassAnalysis.jl fits latent class models by the EM algorithm with random
 restarts, handles missing responses and covariates, reports standard errors, and provides
 the fit indices and the bootstrap likelihood-ratio test needed to choose the number of
@@ -90,28 +90,28 @@ pvalue(test)                            # well above 0.05: no evidence for a thi
 The three-class fit prints a warning that some response probabilities were estimated at
 exactly 0 or 1, which is one of the symptoms of asking for more classes than the data
 support. Fits are reproducible for a given `rng`. The
-[tutorial](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/tutorial/) walks
+[tutorial](https://yanwenwang24.github.io/LatentClassAnalysis.jl/stable/tutorial/) walks
 through the basic workflow, and the guide pages below take each step further.
 
 ## Documentation
 
-- [Getting started](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/tutorial/):
+- [Getting started](https://yanwenwang24.github.io/LatentClassAnalysis.jl/stable/tutorial/):
   prepare, fit, select, read the profiles, classify
 - Guide:
-  [Model selection](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/guide/model_selection/)
+  [Model selection](https://yanwenwang24.github.io/LatentClassAnalysis.jl/stable/guide/model_selection/)
   (information criteria, random restarts, the bootstrap likelihood-ratio test),
-  [Missing data](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/guide/missing_data/),
-  [Covariates](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/guide/covariates/)
+  [Missing data](https://yanwenwang24.github.io/LatentClassAnalysis.jl/stable/guide/missing_data/),
+  [Covariates](https://yanwenwang24.github.io/LatentClassAnalysis.jl/stable/guide/covariates/)
   (latent class regression), and
-  [Standard errors and the bootstrap](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/guide/inference/)
-- [Methodology](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/methodology/):
+  [Standard errors and the bootstrap](https://yanwenwang24.github.io/LatentClassAnalysis.jl/stable/guide/inference/)
+- [Methodology](https://yanwenwang24.github.io/LatentClassAnalysis.jl/stable/methodology/):
   the model, EM with restarts, missing data, covariates, fit indices and the bootstrap
   likelihood-ratio test, standard errors, identifiability
-- [Example: childlessness in Singapore](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/example_childless/):
+- [Example: childlessness in Singapore](https://yanwenwang24.github.io/LatentClassAnalysis.jl/stable/example_childless/):
   replication of the 2024 paper with the bundled data
-- [Migrating from 0.2 to 0.3](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/migration/)
-- API reference: [data, fitting, prediction](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/api/core/)
-  and [inference, bootstrap, deprecated](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/api/inference/)
+- [Migrating from 0.2 to 0.3](https://yanwenwang24.github.io/LatentClassAnalysis.jl/stable/migration/)
+- API reference: [data, fitting, prediction](https://yanwenwang24.github.io/LatentClassAnalysis.jl/stable/api/core/)
+  and [inference, bootstrap, deprecated](https://yanwenwang24.github.io/LatentClassAnalysis.jl/stable/api/inference/)
 
 The scripts in [`examples/`](examples/) run the same workflows outside the docs:
 
@@ -128,13 +128,27 @@ Version 0.3 replaced `LCAModel(k, n_items, n_categories)` + `fit!` with
 `predict` with `predict` (posterior) and `classify` (assignments); fits are reproduced by
 the `rng` keyword rather than `Random.seed!`, and `missing` is no longer a response
 category. The
-[migration guide](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/migration/)
+[migration guide](https://yanwenwang24.github.io/LatentClassAnalysis.jl/stable/migration/)
 lists every old call next to its replacement and explains what changed in the results.
 
 ## Citing
 
-If you use this package, please cite the paper it was developed for and the software
-(see [CITATION.cff](CITATION.cff)):
+If you use this package, please cite the software (GitHub's "Cite this repository"
+button generates the reference from [CITATION.cff](CITATION.cff); add the version you
+used):
+
+```bibtex
+@software{wang_latentclassanalysis_jl,
+  author  = {Wang, Yanwen},
+  title   = {{LatentClassAnalysis.jl}: Latent class analysis in {Julia}},
+  url     = {https://github.com/yanwenwang24/LatentClassAnalysis.jl},
+  version = {0.3.0},
+  year    = {2026}
+}
+```
+
+The package was developed for the analysis in Wang, Teerawichitchainan and Ho (2024),
+which the bundled example replicates; cite it when it is relevant to your work:
 
 ```bibtex
 @article{wang2024childlessness,

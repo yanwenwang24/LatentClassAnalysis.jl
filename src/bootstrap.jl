@@ -41,7 +41,7 @@ function _simulate(rng::AbstractRNG, m::LCAModel, n::Integer,
         X === nothing && throw(ArgumentError("the model has covariates: a design matrix is required"))
         P = size(m.beta, 1)
         size(X) == (n, P) ||
-            throw(DimensionMismatch("the design has size $(size(X)), expected ($n, $P)"))
+            throw(ArgumentError("the design has size $(size(X)), expected ($n, $P)"))
         prior = _class_prior(m.beta, X)          # n × K membership probabilities
         Xfull = Matrix{Float64}(X)
         cnames = m.data.covariate_names
@@ -51,7 +51,7 @@ function _simulate(rng::AbstractRNG, m::LCAModel, n::Integer,
     end
     if missing_mask !== nothing
         size(missing_mask) == (n, J) ||
-            throw(DimensionMismatch("missing_mask has size $(size(missing_mask)), expected ($n, $J)"))
+            throw(ArgumentError("missing_mask has size $(size(missing_mask)), expected ($n, $J)"))
     end
     y = Matrix{Int}(undef, n, J)
     z = Vector{Int}(undef, n)
@@ -92,8 +92,8 @@ function _simulation_design(m::LCAModel, n::Integer, X)
         return m.data.X
     end
     Xc = X isa AbstractVector ? reshape(X, :, 1) : X
-    size(Xc, 1) == n || throw(DimensionMismatch("X has $(size(Xc, 1)) rows but n = $n"))
-    size(Xc, 2) == P - 1 || throw(DimensionMismatch(
+    size(Xc, 1) == n || throw(ArgumentError("X has $(size(Xc, 1)) rows but n = $n"))
+    size(Xc, 2) == P - 1 || throw(ArgumentError(
         "X has $(size(Xc, 2)) columns but the model has $(P - 1) covariate(s) ($covs); " *
         "pass the covariates without the intercept column"))
     Xfull = hcat(ones(n), Float64.(Xc))
@@ -145,6 +145,7 @@ m_sim = fit(LCAModel, d_sim, m.n_classes; rng=StableRNG(1))     # parameter reco
 function simulate(m::LCAModel, n::Integer=nobs(m); rng::AbstractRNG=Random.default_rng(),
                   X::Union{Nothing,AbstractVecOrMat{<:Real}}=nothing,
                   missing_mask::Union{Nothing,AbstractMatrix{Bool}}=nothing)
+    n >= 1 || throw(ArgumentError("the number of observations must be at least 1, got $n"))
     d, _ = _simulate(rng, m, n, _simulation_design(m, n, X), missing_mask)
     return d
 end
@@ -264,7 +265,7 @@ end
 # (`[0 beta]`, P × K), aligned to the reference model.
 function _aligned_params(m_rep::LCAModel, ref::LCAModel)
     K = m_rep.n_classes
-    coefs = (hascovariates(m_rep) && K > 1) ? hcat(zeros(size(m_rep.beta, 1)), m_rep.beta) : nothing
+    coefs = (hascovariates(m_rep) && K > 1) ? _raw_coefs(m_rep) : nothing
     θ = LCAParams(copy(m_rep.class_probs), [copy(B) for B in m_rep.item_probs], coefs)
     _align!(θ, ref)
     return θ
@@ -494,22 +495,8 @@ selects the rows as in [`coeftable`](@ref coeftable(::LCAModel)): `:all`, `:clas
 `:items`.
 """
 function StatsAPI.coeftable(b::LCABootstrap; level::Real=0.95, which::Symbol=:all)
-    which in (:all, :class, :items) ||
-        throw(ArgumentError("which must be :all, :class or :items, got $(repr(which))"))
-    m = b.model
-    c = coef(m)
-    se = stderror(b)
-    ci = confint(b; level=level)
-    names = coefnames(m)
-    n_class = (m.n_classes - 1) * size(m.beta, 1)
-    idx = which === :all ? (1:length(c)) : which === :class ? (1:n_class) : (n_class + 1:length(c))
-    z = c[idx] ./ se[idx]
-    pv = 2 .* Distributions.ccdf.(Distributions.Normal(), abs.(z))
-    pctstr = _level_string(level)
-    return StatsBase.CoefTable(
-        [c[idx], se[idx], z, pv, ci[idx, 1], ci[idx, 2]],
-        ["Estimate", "Std. Error", "z", "Pr(>|z|)", "Lower $pctstr%", "Upper $pctstr%"],
-        names[idx], 4, 3)
+    _check_which(which)
+    return _coeftable(b.model, stderror(b), confint(b; level=level), level, which)
 end
 
 """
@@ -585,7 +572,7 @@ function _params_on(m::LCAModel, d::LCAData)
     coefs = nothing
     if hascovariates(m) && K > 1
         _, A = _standardize(d.X; names=d.covariate_names)
-        coefs = A \ hcat(zeros(size(m.beta, 1)), m.beta)
+        coefs = A \ _raw_coefs(m)
     end
     return LCAParams(copy(m.class_probs), [copy(B) for B in m.item_probs], coefs)
 end

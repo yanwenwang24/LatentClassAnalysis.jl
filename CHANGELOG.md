@@ -6,6 +6,48 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+### Changed
+- Standard errors: the item-response parameters of an empty class (size at most `1e-6`)
+  are held fixed and reported as `NaN`, like boundary parameters, and so are parameters
+  with zero observed information; the remaining standard errors stay finite (conditional
+  on the fixed parameters) instead of the whole covariance matrix becoming `NaN` because
+  the information matrix is singular. The fit warning names both cases.
+- The analytic score no longer computes the covariate Hessian it does not use, which
+  makes the observed information matrix, and therefore `fit` with `se=:hessian`, faster
+  for models with many covariates or classes.
+- `CITATION.cff` now cites the package itself (`preferred-citation` removed, so GitHub's
+  "Cite this repository" produces a software reference), lists the 2024 article under
+  `references`, and carries the author's ORCID. The README and the documentation give a
+  `@software` BibTeX entry for the package next to the article.
+- Stricter input checks: `fit` rejects an `init` model that was fitted with different
+  covariates, `prepare_data` rejects `levels` entries for names that are not items, and
+  `LCAData` rejects `covariate_names` without `covariates`. `simulate` throws an
+  `ArgumentError` (previously `DimensionMismatch`) for a design or missing mask of the
+  wrong size.
+- Items without a single observed response are named in the fit warning and get `NaN`
+  standard errors instead of making the whole covariance matrix `NaN`.
+- The Newton step of the covariate M-step works in preallocated workspace buffers, so
+  EM with covariates no longer allocates per iteration.
+- CI runs the tests with two Julia threads so that `multithreaded=true` is exercised.
+
+### Fixed
+- Starting values (`init`) whose item-response rows were not normalized were clamped to
+  `[1e-10, 1]` before being normalized, so a row such as `[3, 1]` became `[0.5, 0.5]`;
+  rows are now normalized first.
+- `aicc` returns `NaN` instead of a meaningless value when `nobs ≤ dof + 1`.
+- `show(::LCABootstrap)` reported "fewer than two usable replicates" whenever the
+  reference model had a parameter on the boundary; it now summarizes the finite standard
+  errors and counts the boundary ones.
+- `show_profiles` columns no longer run into each other when a standard error is 100
+  percentage points or more.
+- The confidence-level label of `coeftable` (for example `"Lower 57%"`) no longer shows
+  floating-point noise.
+- `LCAData` no longer warns about 0/1 coding for a column that is entirely missing.
+
+### Documentation
+- The childlessness example describes the survey the data come from (the Childless Aging
+  in Singapore Study, 2022) and how the bundled extract relates to the article's sample.
+
 ## [0.3.0] - 2026-09-04
 
 Version 0.3.0 redesigns the package around a single entry point, `fit(LCAModel, data, k)`,
@@ -203,6 +245,7 @@ marked **Breaking** change the signature, the return value, or the results of a 
 
 ## [0.1.0] - 2024-10-27
 
+### Added
 - Initial release: `prepare_data`, `LCAModel`, `fit!`, `diagnostics!`, `predict`.
 
 [Unreleased]: https://github.com/yanwenwang24/LatentClassAnalysis.jl/compare/v0.3.0...HEAD

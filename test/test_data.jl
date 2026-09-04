@@ -2,7 +2,6 @@ using Test
 using LatentClassAnalysis
 using CategoricalArrays
 using DataFrames
-using Tables
 
 @testset "Data preparation" begin
     @testset "Tables.jl sources" begin
@@ -117,7 +116,7 @@ using Tables
 
         # Categorical with missing
         cm = categorical(["a", missing, "b"])
-        dcm = prepare_data((c=cm,), [:c])
+        dcm = @test_logs (:warn, r"1 row\(s\) have all 1 indicators missing") prepare_data((c=cm,), [:c])
         @test vec(dcm.y) == [1, 0, 2]
         @test hasmissing(dcm)
     end
@@ -252,18 +251,22 @@ end
 
 @testset "LCAData: 0/1-coded matrices are caught" begin
     y01 = [0 1; 1 0; 1 1; 0 1; 1 1]
-    err = try
-        LCAData(y01)
-        nothing
-    catch e
-        e
-    end
-    @test err isa ArgumentError
-    @test occursin("0/1-coded", sprint(showerror, err))
+    @test_throws ArgumentError LCAData(y01)
+    @test_throws "0/1-coded" LCAData(y01)
     logs, d = Test.collect_test_logs(() -> LCAData(y01; n_categories=[2, 2]))
     @test count(l -> occursin("contains only the codes 0 and 1", l.message), logs) == 2
     @test nmissing(d) == [2, 1]
     # a genuine 1-based column with missing values does not warn
     logs2, _ = Test.collect_test_logs(() -> LCAData([0 1; 2 2; 1 2]; n_categories=[2, 2]))
     @test !any(l -> occursin("only the codes 0 and 1", l.message), logs2)
+end
+
+@testset "levels for unknown items and names without covariates are rejected" begin
+    tbl = (a=[1, 2, 2, 1], b=[1, 1, 2, 2])
+    @test_throws ArgumentError prepare_data(tbl, [:a, :b]; levels=Dict(:zzz => [1, 2]))
+    @test_throws "not among the items" prepare_data(tbl, [:a, :b]; levels=Dict("zzz" => [1, 2]))
+    @test prepare_data(tbl, [:a]; levels=Dict(:a => [2, 1])).item_levels == [["2", "1"]]
+    @test_throws ArgumentError LCAData([1 2; 2 1]; covariate_names=[:x])
+    # An all-missing column is not mistaken for 0/1 coding
+    @test_logs LCAData([1 0; 2 0; 1 0]; n_categories=[2, 2])
 end

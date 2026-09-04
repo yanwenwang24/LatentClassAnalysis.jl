@@ -5,7 +5,7 @@
 #   "Diverse Pathways to Permanent Childlessness in Singapore: A Latent Class Analysis."
 #   Advances in Life Course Research 61:100628. doi: 10.1016/j.alcr.2024.100628.
 #
-# Run from any directory after setting up the examples environment once:
+# Run from the repository root after setting up the examples environment once:
 #   julia --project=examples -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
 #   julia --project=examples examples/example_childless.jl
 

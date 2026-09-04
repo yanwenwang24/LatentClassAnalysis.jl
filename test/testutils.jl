@@ -229,3 +229,7 @@ const THREE_CLASS_ITEMS = [
     [0.8 0.1 0.1; 0.1 0.8 0.1; 0.1 0.1 0.8],
     [0.1 0.1 0.7 0.1; 0.7 0.1 0.1 0.1; 0.1 0.1 0.1 0.7],
 ]
+
+# A clean fit raises none of the flags.
+clean_flags(f::LatentClassAnalysis.FitFlags) = f.converged && f.n_boundary == 0 &&
+    isempty(f.empty_classes) && f.best_ll_replicated && !f.coef_divergence

@@ -28,9 +28,9 @@ reference — is always the largest class.
 ## Simulated data
 
 800 respondents, five yes/no items, two classes. Age is drawn between 25 and 65, and sex is
-a `Bool` column. The log-odds of class 2 against class 1 are ``-0.8 + 0.06\,(\text{age} -
-45) + 0.8\,\text{female}``, so older respondents and women are more likely to be in class
-2, which is the smaller class (about 38% of the sample).
+a `Bool` column. The log-odds of class 2 against class 1 are
+``-0.8 + 0.06\,(\text{age} - 45) + 0.8\,\text{female}``, so older respondents and women
+are more likely to be in class 2, which is the smaller class (about 38% of the sample).
 
 ```@example covariates
 using LatentClassAnalysis, DataFrames, StableRNGs

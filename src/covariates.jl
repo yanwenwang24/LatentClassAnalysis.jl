@@ -134,25 +134,31 @@ end
 
 """
     _coef_derivatives!(g, H, ws, coefs) -> Q
+    _coef_gradient!(g, ws, coefs) -> Q
 
 Gradient `g` (length `(K - 1)·P`) and Hessian `H` of [`_coef_objective`](@ref) with
 respect to the free coefficients `vec(coefs[:, 2:K])` (column-major: the `P` coefficients
 of class 2 first), evaluated at `coefs`; returns the objective itself. With
 `π[k,u] = softmax(coefs' x_u)_k`,
 `g_k = Σ_u f_u (post[k,u] - π[k,u]) x_u` and
-`H_kl = -Σ_u f_u π[k,u] (δ_kl - π[l,u]) x_u x_u'`. Internal.
+`H_kl = -Σ_u f_u π[k,u] (δ_kl - π[l,u]) x_u x_u'`. `H === nothing` (the second form)
+skips the Hessian, whose cost `O(U·(K-1)²·P²)` dominates the gradient's `O(U·K·P)`;
+the score, which the finite-difference information matrix evaluates twice per free
+parameter, only needs the gradient. Internal.
 """
-function _coef_derivatives!(g::AbstractVector{Float64}, H::AbstractMatrix{Float64},
+function _coef_derivatives!(g::AbstractVector{Float64}, H::Union{Nothing,AbstractMatrix{Float64}},
                             ws::LCAWorkspace, coefs::AbstractMatrix{Float64})
     K, U = ws.K, ws.U
     P = size(coefs, 1)
     dim = (K - 1) * P
-    (length(g) == dim && size(H) == (dim, dim)) ||
-        throw(DimensionMismatch("g and H must have $dim entries and be $dim × $dim"))
+    length(g) == dim || throw(DimensionMismatch("g must have $dim entries"))
+    if H !== nothing
+        size(H) == (dim, dim) || throw(DimensionMismatch("H must be $dim × $dim"))
+        fill!(H, 0.0)
+    end
     eta, post, freq, X, π = ws.eta2, ws.post, ws.freq, ws.Xst, ws.w
     _eta!(eta, coefs, X)
     fill!(g, 0.0)
-    fill!(H, 0.0)
     q = 0.0
     @inbounds for u in 1:U
         f = freq[u]
@@ -169,6 +175,7 @@ function _coef_derivatives!(g::AbstractVector{Float64}, H::AbstractMatrix{Float6
                 g[off + p] += r * X[p, u]
             end
         end
+        H === nothing && continue
         for l in 2:K
             offl = (l - 2) * P
             for k in 2:K
@@ -185,6 +192,9 @@ function _coef_derivatives!(g::AbstractVector{Float64}, H::AbstractMatrix{Float6
     end
     return q
 end
+
+_coef_gradient!(g::AbstractVector{Float64}, ws::LCAWorkspace, coefs::AbstractMatrix{Float64}) =
+    _coef_derivatives!(g, nothing, ws, coefs)
 
 # Average class-membership probabilities over the (weighted) rows at `coefs`.
 function _mean_prior!(class_probs::AbstractVector{Float64}, ws::LCAWorkspace,
@@ -216,31 +226,34 @@ factorization, caps `max|Δ|` at `NEWTON_STEP_CAP` on the standardized scale, an
 the step until the objective [`_coef_objective`](@ref) does not decrease (at most
 `NEWTON_MAX_HALVINGS` halvings; otherwise the coefficients are kept). The ridge and the
 cap only affect the path: the fixed point is the exact maximizer. `θ.class_probs` is then
-set to the average membership probabilities over the rows. Internal.
+set to the average membership probabilities over the rows. Works in the workspace
+buffers `cg`, `cH`, `cM`, `cΔ` and `ctrial` without allocating. Internal.
 """
 function _update_coefs!(θ::LCAParams, ws::LCAWorkspace)
     coefs = θ.coefs
     P, K = size(coefs)
     dim = (K - 1) * P
     if dim > 0
-        g = Vector{Float64}(undef, dim)
-        H = Matrix{Float64}(undef, dim, dim)
+        g, H, M, Δ, trial = ws.cg, ws.cH, ws.cM, ws.cΔ, ws.ctrial
+        (length(g) == dim && size(trial) == (P, K)) || throw(DimensionMismatch(
+            "coefficients of size $(size(coefs)) do not match the workspace buffers"))
         q0 = _coef_derivatives!(g, H, ws, coefs)
         tr = 0.0
         @inbounds for i in 1:dim
             tr -= H[i, i]
         end
         λ = 1e-6 * max(1.0, tr / dim)
-        M = -H
+        @inbounds for j in 1:dim, i in 1:dim
+            M[i, j] = -H[i, j]
+        end
         @inbounds for i in 1:dim
             M[i, i] += λ
         end
-        F = cholesky(Symmetric(M); check=false)
+        F = cholesky!(Symmetric(M); check=false)
         if issuccess(F) && all(isfinite, g) && isfinite(q0)
-            Δ = F \ g
+            ldiv!(F, copyto!(Δ, g))
             mx = maximum(abs, Δ)
             mx > NEWTON_STEP_CAP && (Δ .*= NEWTON_STEP_CAP / mx)
-            trial = similar(coefs)
             t = 1.0
             for _ in 0:NEWTON_MAX_HALVINGS
                 copyto!(trial, coefs)

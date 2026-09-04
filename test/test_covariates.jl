@@ -62,19 +62,23 @@ const LCA = LatentClassAnalysis
     @testset "Workspace" begin
         ws = LCA.LCAWorkspace(d3, 3; covariates=true)
         @test ws.covariates && !ws.aggregated && ws.U == n3
-        @test size(ws.Xt) == (3, n3) && ws.Xt == permutedims(X3)
         @test size(ws.Xst) == (3, n3) && size(ws.A) == (3, 3)
         @test all(abs.(mean(ws.Xst[2:3, :], dims=2)) .< 1e-12)
         @test size(ws.eta) == (3, n3) && size(ws.eta2) == (3, n3)
+        @test length(ws.cg) == 6 && size(ws.cH) == (6, 6) && size(ws.cM) == (6, 6) &&
+              length(ws.cΔ) == 6 && size(ws.ctrial) == (3, 3)
         ws2 = LCA.LCAWorkspace(ws)
-        @test ws2.Xst === ws.Xst && ws2.A === ws.A && ws2.Xt === ws.Xt
+        @test ws2.Xst === ws.Xst && ws2.A === ws.A
         @test ws2.eta !== ws.eta && ws2.eta2 !== ws.eta2 && size(ws2.eta) == size(ws.eta)
+        @test ws2.cH !== ws.cH && size(ws2.cH) == size(ws.cH) && size(ws2.ctrial) == (3, 3)
         # Raw-scale workspace (used by predict)
         wr = LCA.LCAWorkspace(d3, 3; covariates=true, standardize=false)
-        @test wr.Xst === wr.Xt && wr.A == I
-        # Without covariates no linear predictors are stored
+        @test wr.Xst == permutedims(X3) && wr.A == I
+        # Without covariates no linear predictors and no Newton buffers are stored
         w0 = LCA.LCAWorkspace(d3, 3)
         @test !w0.covariates && w0.aggregated && size(w0.eta) == (3, 0) && size(w0.Xst) == (1, w0.U)
+        @test isempty(w0.cg) && size(w0.cH) == (0, 0) && size(w0.ctrial) == (0, 0)
+        @test_throws ArgumentError LCA.LCAWorkspace(d3, 3; n_categories=[2, 3])
         @test_throws ArgumentError LCA.LCAWorkspace(LCAData(y3), 3; covariates=true)
         # Parameters with coefficients need a covariate workspace
         θ = LCA._init_random(StableRNG(1), 3, d3.n_categories)
@@ -124,6 +128,13 @@ const LCA = LatentClassAnalysis
         @test isapprox(H, H'; rtol=1e-12)
         @test isposdef(Symmetric(-H))
         @test_throws DimensionMismatch LCA._coef_derivatives!(zeros(2), zeros(2, 2), ws, β)
+        @test_throws DimensionMismatch LCA._coef_derivatives!(zeros(dim), zeros(2, 2), ws, β)
+
+        # The gradient-only kernel used by the score returns the same gradient and objective
+        gg = zeros(dim)
+        @test LCA._coef_gradient!(gg, ws, β) == q0
+        @test gg == g
+        @test_throws DimensionMismatch LCA._coef_gradient!(zeros(2), ws, β)
 
         # One M-step increases Q and keeps class 1 as reference
         θn = LCA.LCAParams(fill(1 / 3, 3), θ.item_probs, copy(β))
@@ -174,7 +185,7 @@ const LCA = LatentClassAnalysis
         m = @test_logs fit(LCAModel, d, 2; rng=StableRNG(1), n_starts=8, n_final=2)
         @test m isa LCAModel && hascovariates(m)
         @test size(m.beta) == (2, 1)
-        @test m.converged && LCA._clean(m.flags)
+        @test m.converged && clean_flags(m.flags)
         @test !m.options.aggregate                             # disabled with covariates
         @test issorted(m.class_probs; rev=true)
         @test sum(m.class_probs) ≈ 1
@@ -297,7 +308,8 @@ const LCA = LatentClassAnalysis
         @test dof(m1) == 6
         @test loglikelihood(m1, d) == m1.loglik
         @test predict(m1, d) == ones(n, 1)
-        @test sprint(show, m1) isa String
+        s1 = sprint(show, m1)
+        @test occursin("1 class", s1) && occursin("covariates: x", s1)
     end
 
     @testset "Prediction on new data" begin
@@ -409,7 +421,7 @@ const LCA = LatentClassAnalysis
         msep = @test_logs (:warn, r"covariate coefficients diverged \(quasi-complete separation\)") match_mode = :any fit(
             LCAModel, dsep, 2; rng=StableRNG(1), n_starts=4, n_final=2, max_iter=200)
         @test msep.flags.coef_divergence
-        @test !LCA._clean(msep.flags)
+        @test !clean_flags(msep.flags)
         @test occursin("separation", sprint(show, msep))
         @test !any(isnan, msep.beta) && all(isfinite, msep.beta)
         @test isfinite(msep.loglik)
@@ -479,4 +491,35 @@ end
     _, mp = Test.collect_test_logs(() -> fit(LCAModel, d, 2; covariates=false, init=init, n_starts=1, rng=StableRNG(2)))
     _, m2 = Test.collect_test_logs(() -> fit(LCAModel, d, 2; init=mp, n_starts=1, rng=StableRNG(3)))
     @test all(isfinite, m2.beta) && all(isfinite, m2.class_probs)
+end
+
+@testset "_init_split with coefficients" begin
+    θ = LCA.LCAParams([0.5, 0.3, 0.2], [fill(1 / 3, 3, 3) for _ in 1:2], [0.0 0.4 -0.2; 0.0 0.5 0.1])
+    Xs = hcat(ones(50), randn(StableRNG(5), 50))
+    θs = LCA._init_split(θ, 2, StableRNG(6))
+    @test θs.class_probs ≈ [0.5, 0.15, 0.2, 0.15]
+    @test size(θs.coefs) == (2, 4) && all(iszero, θs.coefs[:, 1])
+    prior = LCA._class_prior(θ.coefs[:, 2:3], Xs)
+    prior_s = LCA._class_prior(θs.coefs[:, 2:4], Xs)
+    @test prior_s[:, 2] ≈ prior_s[:, 4]                      # the halves share the prior ...
+    @test prior_s[:, 2] .+ prior_s[:, 4] ≈ prior[:, 2]        # ... of the class they came from
+    @test prior_s[:, [1, 3]] ≈ prior[:, [1, 3]]
+    @test all(all(sum(Q; dims=2) .≈ 1) for Q in θs.item_probs)
+end
+
+@testset "init model fitted on other covariates is rejected" begin
+    rng = StableRNG(72)
+    n = 200
+    y = rand(rng, 1:2, n, 4)
+    x = randn(rng, n)
+    d_age = LCAData(y; n_categories=fill(2, 4), covariates=x, covariate_names=[:age])
+    d_inc = LCAData(y; n_categories=fill(2, 4), covariates=x, covariate_names=[:income])
+    _, m_inc = Test.collect_test_logs(() -> fit(LCAModel, d_inc, 2; rng=StableRNG(1), n_starts=2, n_final=1, se=:none))
+    @test_throws ArgumentError fit(LCAModel, d_age, 2; init=m_inc, rng=StableRNG(1), n_starts=1)
+    @test_throws "fitted with the covariates [:income]" fit(LCAModel, d_age, 2; init=[m_inc], rng=StableRNG(1), n_starts=1)
+    # The same model is accepted on its own data, and on an unconditional fit of other data
+    _, m_ok = Test.collect_test_logs(() -> fit(LCAModel, d_inc, 2; init=m_inc, rng=StableRNG(1), n_starts=1, se=:none))
+    @test m_ok.loglik ≈ m_inc.loglik rtol = 1e-8
+    _, m_u = Test.collect_test_logs(() -> fit(LCAModel, d_age, 2; init=m_inc, covariates=false, rng=StableRNG(1), n_starts=1, se=:none))
+    @test !hascovariates(m_u)
 end

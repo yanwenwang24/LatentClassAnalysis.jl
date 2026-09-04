@@ -113,7 +113,7 @@ function _posterior_and_ll(m::LCAModel, d::LCAData)
     withcov = hascovariates(m)
     ws = LCAWorkspace(d, m.n_classes; aggregate=!withcov, covariates=withcov,
                       n_categories=m.n_categories, standardize=false)
-    coefs = withcov ? hcat(zeros(size(m.beta, 1)), m.beta) : nothing
+    coefs = withcov ? _raw_coefs(m) : nothing
     θ = LCAParams(m.class_probs, m.item_probs, coefs)
     ll = estep!(ws, θ)
     return _expand_posterior(ws), ll
