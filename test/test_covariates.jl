@@ -463,3 +463,20 @@ const LCA = LatentClassAnalysis
         @test occursin("Latent Class Profiles", out) && !occursin("coefficients", out)
     end
 end
+
+@testset "init with a zero class probability under covariates stays finite" begin
+    rng = StableRNG(11)
+    n = 300
+    y = rand(rng, 1:2, n, 4)
+    x = randn(rng, n)
+    d = LCAData(y; n_categories=fill(2, 4), covariates=reshape(x, :, 1), covariate_names=[:x])
+    init = (class_probs=[1.0, 0.0], item_probs=[fill(0.5, 2, 2) for _ in 1:4])
+    _, m = Test.collect_test_logs(() -> fit(LCAModel, d, 2; init=init, n_starts=1, rng=StableRNG(1)))
+    @test all(isfinite, m.beta)
+    @test all(isfinite, m.class_probs)
+    @test all(isfinite, coef(m))
+    # a plain model that lost a class can still seed a covariate fit
+    _, mp = Test.collect_test_logs(() -> fit(LCAModel, d, 2; covariates=false, init=init, n_starts=1, rng=StableRNG(2)))
+    _, m2 = Test.collect_test_logs(() -> fit(LCAModel, d, 2; init=mp, n_starts=1, rng=StableRNG(3)))
+    @test all(isfinite, m2.beta) && all(isfinite, m2.class_probs)
+end

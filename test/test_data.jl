@@ -249,3 +249,21 @@ using Tables
                                            ones(2, 2), [:intercept])                      # names length
     end
 end
+
+@testset "LCAData: 0/1-coded matrices are caught" begin
+    y01 = [0 1; 1 0; 1 1; 0 1; 1 1]
+    err = try
+        LCAData(y01)
+        nothing
+    catch e
+        e
+    end
+    @test err isa ArgumentError
+    @test occursin("0/1-coded", sprint(showerror, err))
+    logs, d = Test.collect_test_logs(() -> LCAData(y01; n_categories=[2, 2]))
+    @test count(l -> occursin("contains only the codes 0 and 1", l.message), logs) == 2
+    @test nmissing(d) == [2, 1]
+    # a genuine 1-based column with missing values does not warn
+    logs2, _ = Test.collect_test_logs(() -> LCAData([0 1; 2 2; 1 2]; n_categories=[2, 2]))
+    @test !any(l -> occursin("only the codes 0 and 1", l.message), logs2)
+end

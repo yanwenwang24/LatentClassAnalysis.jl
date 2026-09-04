@@ -19,7 +19,8 @@ unless `drop_unused_levels=false`; every item must keep at least two levels.
 - `covariates`: names of numeric (`Real`/`Bool`) columns to use as covariates of the
   class-membership model. Missing values are not allowed in covariates: drop those rows.
 - `levels`: a `Dict` (or any `AbstractDict`) mapping an item name to its level vector, to
-  fix the level order or to include levels absent from the column. Values are matched to
+  fix the level order or, together with `drop_unused_levels=false`, to include levels
+  absent from the column. Values are matched to
   the supplied levels by their string representation (`"1"`, `"true"`, ...); a value not
   in the list is an error.
 - `drop_unused_levels::Bool=true`: drop levels that do not occur in the column

@@ -81,6 +81,12 @@ function _normalize_init!(θ::LCAParams)
     (all(isfinite, cp) && all(>=(0), cp) && sum(cp) > 0) ||
         throw(ArgumentError("init class probabilities must be finite, non-negative and not all zero"))
     cp ./= sum(cp)
+    # Floor the class sizes so that a class supplied with probability zero (e.g. an init
+    # model that lost a class) neither stays dead forever nor yields log(0) coefficients.
+    for k in eachindex(cp)
+        cp[k] = max(cp[k], PROB_FLOOR)
+    end
+    cp ./= sum(cp)
     for P in θ.item_probs
         (all(isfinite, P) && all(>=(0), P)) ||
             throw(ArgumentError("init item probabilities must be finite and non-negative"))
@@ -103,7 +109,7 @@ function _seed_coefs!(θ::LCAParams, ws::LCAWorkspace)
         P, K = size(ws.Xst, 1), ws.K
         coefs = zeros(P, K)
         for k in 2:K
-            coefs[1, k] = log(θ.class_probs[k] / θ.class_probs[1])
+            coefs[1, k] = log(max(θ.class_probs[k], PROB_FLOOR) / max(θ.class_probs[1], PROB_FLOOR))
         end
         θ.coefs = coefs
     end
@@ -118,6 +124,7 @@ function _as_params(m::LCAModel, ws::LCAWorkspace)
         P = size(ws.Xst, 1)
         size(m.beta, 1) == P || throw(ArgumentError(
             "init model has $(size(m.beta, 1) - 1) covariates but the data has $(P - 1)"))
+        all(isfinite, m.beta) || throw(ArgumentError("init model has non-finite covariate coefficients"))
         # Raw-scale coefficients (class 1 as reference) to the standardized scale
         θ.coefs = ws.A \ hcat(zeros(P), m.beta)
     end

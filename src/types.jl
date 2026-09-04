@@ -16,7 +16,8 @@ accepts an already coded matrix.
   and one column per item. The codes of item `j` are `1, 2, …, n_categories[j]`; a
   `missing` entry (or the code `0`) marks a missing response.
 - `n_categories`: number of response categories of each item. Defaults to the largest code
-  observed in each column; every column then needs at least two distinct observed codes.
+  observed in each column, which must then be at least 2 (a column whose largest code is
+  1 has a single observed category).
 - `item_names`: item names as `Symbol`s (default `:item1, :item2, …`).
 - `item_levels`: `item_levels[j][c]` is the label of code `c` of item `j`
   (default `"1", "2", …`).
@@ -125,10 +126,19 @@ function LCAData(y::AbstractMatrix{<:Union{Missing,Integer}};
         for j in 1:J
             C[j] = n == 0 ? 0 : maximum(view(codes, :, j))
             C[j] >= 2 || throw(ArgumentError(
-                "column $j has fewer than two observed categories; pass n_categories explicitly"))
+                "column $j has no code larger than 1, so it shows a single observed category. " *
+                "Codes are 1-based and 0 marks a missing response: 0/1-coded data must be " *
+                "shifted by one (or prepared with prepare_data); otherwise pass n_categories explicitly"))
         end
     else
         C = Int.(n_categories)
+        for j in 1:J
+            col = view(codes, :, j)
+            if n > 0 && any(==(0), col) && maximum(col) <= 1
+                @warn "column $j contains only the codes 0 and 1; 0 is the missing code, so if these " *
+                      "data are 0/1-coded shift them by one or use prepare_data"
+            end
+        end
     end
     levels = item_levels === nothing ? [string.(1:c) for c in C] :
              [String.(collect(l)) for l in item_levels]
