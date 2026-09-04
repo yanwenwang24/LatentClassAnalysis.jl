@@ -2,148 +2,250 @@ using Test
 using LatentClassAnalysis
 using CategoricalArrays
 using DataFrames
+using Tables
 
-@testset "Data Preparation" begin
-    @testset "Basic preparation" begin
-        df = DataFrame(
-            x1=repeat([1, 2], 50),                               # binary 1/2
-            x2=repeat([0, 1], 50),                               # binary 0/1
-            x3=categorical(repeat(["A", "B", "C"], 34)[1:100]),  # 3 categories
-            x4=repeat([1, 2], 50),                               # binary 1/2
-            x5=repeat([1, 2], 50)                                # binary 1/2
-        )
+@testset "Data preparation" begin
+    @testset "Tables.jl sources" begin
+        df = DataFrame(a=[1, 2, 2, 1], b=["no", "yes", "yes", "no"], c=[1, 3, 3, 1])
+        d_df = prepare_data(df, [:a, :b, :c])
+        @test d_df isa LCAData
+        @test d_df.y == [1 1 1; 2 2 2; 2 2 2; 1 1 1]
+        @test d_df.n_categories == [2, 2, 2]
+        @test d_df.item_names == [:a, :b, :c]
+        @test d_df.item_levels == [["1", "2"], ["no", "yes"], ["1", "3"]]
+        @test nobs(d_df) == 4
+        @test size(d_df) == (4, 3)
+        @test size(d_df, 2) == 3
+        @test !hasmissing(d_df)
+        @test nmissing(d_df) == [0, 0, 0]
+        @test !hascovariates(d_df)
+        @test d_df.X == ones(4, 1)
+        @test d_df.covariate_names == [:intercept]
 
-        data, n_cats = prepare_data(df, :x1, :x2, :x3, :x4, :x5)
-        @test data isa Matrix{Int}
-        @test n_cats isa Vector{Int}
-        @test size(data) == (100, 5)
-        @test n_cats == [2, 2, 3, 2, 2]
-        @test all(x -> x ≥ 1, data)  # All values are 1-based
-        for j in 1:5
-            # Every code between 1 and n_cats[j] is used
-            @test sort(unique(data[:, j])) == 1:n_cats[j]
-        end
-        @test data[:, 1] == data[:, 2] == data[:, 4] == data[:, 5]
-        @test data[1:6, 3] == [1, 2, 3, 1, 2, 3]
+        # NamedTuple of vectors
+        nt = (a=[1, 2, 2, 1], b=["no", "yes", "yes", "no"], c=[1, 3, 3, 1])
+        d_nt = prepare_data(nt, [:a, :b, :c])
+        @test d_nt.y == d_df.y
+        @test d_nt.item_levels == d_df.item_levels
 
-        # Single column
-        data_single, n_cats_single = prepare_data(df, :x1)
-        @test size(data_single) == (100, 1)
-        @test n_cats_single == [2]
-        @test data_single[:, 1] == data[:, 1]
+        # Vector of NamedTuples (row table)
+        rows = [(a=1, b="no", c=1), (a=2, b="yes", c=3), (a=2, b="yes", c=3), (a=1, b="no", c=1)]
+        d_rows = prepare_data(rows, [:a, :b, :c])
+        @test d_rows.y == d_df.y
+
+        # String column names
+        d_str = prepare_data(df, ["a", "b"])
+        @test d_str.item_names == [:a, :b]
+        @test d_str.y == d_df.y[:, 1:2]
+
+        # Column subset and order follow `items`
+        d_rev = prepare_data(df, [:c, :a])
+        @test d_rev.y == d_df.y[:, [3, 1]]
+        @test d_rev.item_names == [:c, :a]
+    end
+
+    @testset "Errors" begin
+        df = DataFrame(a=[1, 2, 2, 1], b=["no", "yes", "yes", "no"])
+        @test_throws ArgumentError prepare_data([1 2; 2 1], [:a])          # not a table
+        @test_throws ArgumentError prepare_data(df, [:a, :zzz])              # unknown column
+        @test_throws "available columns: a, b" prepare_data(df, [:zzz])
+        @test_throws ArgumentError prepare_data(df, Symbol[])                # no items
+        @test_throws ArgumentError prepare_data(df, [:a, :a])                # duplicate
+        @test_throws ArgumentError prepare_data(DataFrame(a=[1, 1, 1]), [:a])  # one level
+        @test_throws ArgumentError prepare_data(DataFrame(a=[1, 2], b=[1, 2]), [:a]; covariates=[:zzz])
     end
 
     @testset "Dense recoding of integer columns" begin
-        recode(v) = vec(prepare_data(DataFrame(x=v), :x)[1])
-        n_cats(v) = prepare_data(DataFrame(x=v), :x)[2][1]
+        recode(v) = vec(prepare_data((x=v,), [:x]).y)
+        n_cats(v) = prepare_data((x=v,), [:x]).n_categories[1]
+        labels(v) = prepare_data((x=v,), [:x]).item_levels[1]
 
-        @test recode([1, 2]) == [1, 2]      # unchanged
+        @test recode([1, 2]) == [1, 2]
         @test recode([1, 3]) == [1, 2]
         @test recode([2, 3]) == [1, 2]
         @test recode([-1, 1]) == [1, 2]
         @test recode([0, 2]) == [1, 2]
         @test recode([0, 1]) == [1, 2]
-        # Codes follow the sorted values, not the order of appearance
-        @test recode([2, 1]) == [2, 1]
+        @test recode([2, 1]) == [2, 1]                     # sorted values, not order of appearance
         @test recode([30, 10, 20, 10]) == [3, 1, 2, 1]
         @test recode([5, 5, 5, 7]) == [1, 1, 1, 2]
-        @test recode([-3, 0, 3, 0, -3]) == [1, 2, 3, 2, 1]
-
-        # The number of categories is the number of distinct values, not the largest code
         @test n_cats([1, 3, 1, 3]) == 2
         @test n_cats([0, 5, 10]) == 3
-        @test n_cats([7, 7, 7, 7]) == 1
-
-        # Non-Int integer columns are recoded too
+        @test labels([0, 5, 10]) == ["0", "5", "10"]
         @test recode(Int8[0, 1, 1]) == [1, 2, 2]
         @test recode(UInt8[3, 9, 3]) == [1, 2, 1]
     end
 
-    @testset "Bool column" begin
-        df = DataFrame(b=[true, false, true, true])
-        data, n_cats = prepare_data(df, :b)
-        @test data isa Matrix{Int}
-        @test vec(data) == [2, 1, 2, 2]  # false -> 1, true -> 2
-        @test n_cats == [2]
+    @testset "Bool, String and integer-valued Float64 columns" begin
+        d_bool = prepare_data((b=[true, false, true, true],), [:b])
+        @test vec(d_bool.y) == [2, 1, 2, 2]
+        @test d_bool.item_levels[1] == ["false", "true"]
+
+        d_str = prepare_data((s=["yes", "no", "yes", "maybe"],), [:s])
+        @test vec(d_str.y) == [3, 2, 3, 1]                  # maybe < no < yes
+        @test d_str.item_levels[1] == ["maybe", "no", "yes"]
+
+        d_flt = prepare_data((f=[1.0, 2.0, 2.0, 3.0],), [:f])
+        @test vec(d_flt.y) == [1, 2, 2, 3]
+        @test d_flt.item_levels[1] == ["1", "2", "3"]
+
+        d_frac = prepare_data((f=[0.5, 1.5, 0.5],), [:f])
+        @test d_frac.item_levels[1] == ["0.5", "1.5"]
     end
 
-    @testset "String column" begin
-        df = DataFrame(s=["yes", "no", "yes", "maybe"])
-        data, n_cats = prepare_data(df, :s)
-        # Sorted distinct values: maybe < no < yes
-        @test vec(data) == [3, 2, 3, 1]
-        @test n_cats == [3]
+    @testset "Categorical columns" begin
+        # Level order is kept; unused levels are dropped by default
+        c = categorical(["a", "b", "a"]; levels=["b", "a", "c"])
+        d = prepare_data((c=c,), [:c])
+        @test vec(d.y) == [2, 1, 2]
+        @test d.n_categories == [2]
+        @test d.item_levels[1] == ["b", "a"]
+
+        # ... or kept on request
+        d_keep = prepare_data((c=c,), [:c]; drop_unused_levels=false)
+        @test vec(d_keep.y) == [2, 1, 2]
+        @test d_keep.n_categories == [3]
+        @test d_keep.item_levels[1] == ["b", "a", "c"]
+
+        # Ordered categorical and categorical of integers
+        o = categorical(["low", "high", "mid", "low"]; levels=["low", "mid", "high"], ordered=true)
+        @test vec(prepare_data((o=o,), [:o]).y) == [1, 3, 2, 1]
+        ci = categorical([10, 30, 30, 10])
+        dci = prepare_data((c=ci,), [:c])
+        @test vec(dci.y) == [1, 2, 2, 1]
+        @test dci.item_levels[1] == ["10", "30"]
+
+        # Categorical with missing
+        cm = categorical(["a", missing, "b"])
+        dcm = prepare_data((c=cm,), [:c])
+        @test vec(dcm.y) == [1, 0, 2]
+        @test hasmissing(dcm)
     end
 
-    @testset "Categorical column" begin
-        # An unused level must not count as a category
-        df = DataFrame(c=categorical(["a", "b", "a"]; levels=["a", "b", "c"]))
-        data, n_cats = prepare_data(df, :c)
-        @test vec(data) == [1, 2, 1]
-        @test n_cats == [2]
+    @testset "levels override" begin
+        x = ["no", "yes", "yes", "no"]
+        d = prepare_data((x=x,), [:x]; levels=Dict(:x => ["yes", "no"]))
+        @test vec(d.y) == [2, 1, 1, 2]
+        @test d.item_levels[1] == ["yes", "no"]
 
-        # Codes follow the level order, not the lexical order
-        df2 = DataFrame(c=categorical(["a", "b", "a"]; levels=["b", "a"]))
-        data2, n_cats2 = prepare_data(df2, :c)
-        @test vec(data2) == [2, 1, 2]
-        @test n_cats2 == [2]
+        # String keys work too; an unused supplied level is dropped by default ...
+        d2 = prepare_data((x=x,), [:x]; levels=Dict("x" => ["yes", "maybe", "no"]))
+        @test d2.item_levels[1] == ["yes", "no"]
+        @test vec(d2.y) == [2, 1, 1, 2]
+        # ... and kept with drop_unused_levels=false
+        d3 = prepare_data((x=x,), [:x]; levels=Dict(:x => ["yes", "maybe", "no"]), drop_unused_levels=false)
+        @test d3.item_levels[1] == ["yes", "maybe", "no"]
+        @test vec(d3.y) == [3, 1, 1, 3]
+        @test d3.n_categories == [3]
 
-        # Ordered categorical
-        df3 = DataFrame(c=categorical(["low", "high", "mid", "low"];
-            levels=["low", "mid", "high"], ordered=true))
-        data3, n_cats3 = prepare_data(df3, :c)
-        @test vec(data3) == [1, 3, 2, 1]
-        @test n_cats3 == [3]
+        # Values are matched to the supplied levels by their string form
+        d4 = prepare_data((x=[0, 1, 1],), [:x]; levels=Dict(:x => ["1", "0"]))
+        @test vec(d4.y) == [2, 1, 1]
+        d5 = prepare_data((x=[true, false],), [:x]; levels=Dict(:x => [true, false]))
+        @test vec(d5.y) == [1, 2]
 
-        # Categorical made from integers
-        df4 = DataFrame(c=categorical([10, 30, 30, 10]))
-        data4, n_cats4 = prepare_data(df4, :c)
-        @test vec(data4) == [1, 2, 2, 1]
-        @test n_cats4 == [2]
+        # A value outside the supplied levels is an error; items without an entry use the data
+        @test_throws ArgumentError prepare_data((x=x,), [:x]; levels=Dict(:x => ["yes"]))
+        @test_throws ArgumentError prepare_data((x=x,), [:x]; levels=Dict(:x => ["yes", "yes"]))
+        d6 = prepare_data((x=x, z=[1, 2, 1, 2]), [:x, :z]; levels=Dict(:x => ["yes", "no"]))
+        @test d6.item_levels == [["yes", "no"], ["1", "2"]]
     end
 
-    @testset "Mixed column types encode the same pattern identically" begin
-        df = DataFrame(
-            i=[1, 3, 3, 1],
-            b=[false, true, true, false],
-            s=["no", "yes", "yes", "no"],
-            c=categorical(["x", "y", "y", "x"]; levels=["x", "y", "z"])
-        )
-        data, n_cats = prepare_data(df, :i, :b, :s, :c)
-        @test n_cats == [2, 2, 2, 2]
-        @test data[:, 1] == [1, 2, 2, 1]
-        @test all(data[:, j] == data[:, 1] for j in 2:4)
+    @testset "Missing responses" begin
+        tbl = (a=[1, missing, 2, 2], b=["x", "y", missing, "y"], c=[1, 2, 1, 2])
+        d = prepare_data(tbl, [:a, :b, :c])
+        @test d.y == [1 1 1; 0 2 2; 2 0 1; 2 2 2]
+        @test hasmissing(d)
+        @test nmissing(d) == [1, 1, 0]
+        @test d.n_categories == [2, 2, 2]
+
+        # Rows with every indicator missing are kept and counted in a warning
+        tbl2 = (a=[1, missing, 2, missing], b=[1, missing, 2, missing])
+        d2 = @test_logs (:warn, r"^2 row\(s\) have all 2 indicators missing") prepare_data(tbl2, [:a, :b])
+        @test nobs(d2) == 4
+        @test d2.y[2, :] == [0, 0]
+        @test_logs prepare_data(tbl, [:a, :b, :c])   # no warning otherwise
     end
 
-    @testset "zero_based keyword" begin
-        df = DataFrame(x=[0, 1, 0, 1], y=[1, 2, 1, 2])
+    @testset "Covariates" begin
+        tbl = (a=[1, 2, 2, 1], b=[1, 1, 2, 2], age=[30.0, 41.5, 25.0, 60.0],
+               female=[true, false, false, true], name=["p", "q", "r", "s"],
+               agemiss=[30.0, missing, 25.0, 60.0])
+        d = prepare_data(tbl, [:a, :b]; covariates=[:age, :female])
+        @test hascovariates(d)
+        @test d.covariate_names == [:intercept, :age, :female]
+        @test d.X == [1.0 30.0 1.0; 1.0 41.5 0.0; 1.0 25.0 0.0; 1.0 60.0 1.0]
+        @test d.X isa Matrix{Float64}
+        @test d.y == [1 1; 2 1; 2 2; 1 2]
 
-        # Wrong length still throws
-        @test_throws ArgumentError prepare_data(df, :x, :y; zero_based=[true])
-        @test_throws ArgumentError prepare_data(df, :x; zero_based=[true, false])
-        @test_throws ArgumentError prepare_data(df, :x, :y; zero_based=Bool[])
+        # String covariate names
+        d2 = prepare_data(tbl, [:a, :b]; covariates=["age"])
+        @test d2.covariate_names == [:intercept, :age]
 
-        # Right length is accepted and ignored: codes are always inferred from the data
-        ref_data, ref_cats = prepare_data(df, :x, :y)
-        @test ref_data == [1 1; 2 2; 1 1; 2 2]
-        @test ref_cats == [2, 2]
-        for zb in ([true, false], [false, true], [true, true], [false, false])
-            data, n_cats = prepare_data(df, :x, :y; zero_based=zb)
-            @test data == ref_data
-            @test n_cats == ref_cats
-        end
-        data_nothing, cats_nothing = prepare_data(df, :x, :y; zero_based=nothing)
-        @test data_nothing == ref_data
-        @test cats_nothing == ref_cats
+        @test_throws ArgumentError prepare_data(tbl, [:a, :b]; covariates=[:agemiss])   # missing
+        @test_throws "drop rows with missing covariates" prepare_data(tbl, [:a, :b]; covariates=[:agemiss])
+        @test_throws ArgumentError prepare_data(tbl, [:a, :b]; covariates=[:name])      # string
+        @test_throws ArgumentError prepare_data(tbl, [:a, :b]; covariates=[:age, :age]) # duplicate
     end
 
-    @testset "Column selection" begin
-        df = DataFrame(a=[1, 2, 2], b=[10, 10, 20], unused=["p", "q", "r"])
-        data_ab, cats_ab = prepare_data(df, :a, :b)
-        data_ba, cats_ba = prepare_data(df, :b, :a)
-        @test data_ab == data_ba[:, [2, 1]]
-        @test cats_ab == cats_ba[[2, 1]]
-        @test size(data_ab) == (3, 2)
-        @test_throws ArgumentError prepare_data(df, :missing_column)
+    @testset "LCAData from a matrix" begin
+        y = [1 2 1; 2 2 missing; 1 1 1; 2 1 2]
+        d = LCAData(y)
+        @test d.y == [1 2 1; 2 2 0; 1 1 1; 2 1 2]
+        @test d.y isa Matrix{Int}
+        @test d.n_categories == [2, 2, 2]
+        @test d.item_names == [:item1, :item2, :item3]
+        @test d.item_levels == [["1", "2"], ["1", "2"], ["1", "2"]]
+        @test hasmissing(d)
+        @test nmissing(d) == [0, 0, 1]
+        @test !hascovariates(d)
+
+        # Explicit metadata; codes may be given as 0 directly; other integer types
+        d2 = LCAData(Int8[1 2; 2 0; 1 3]; n_categories=[2, 3], item_names=["u", "v"],
+                     item_levels=[["a", "b"], ["x", "y", "z"]])
+        @test d2.y == [1 2; 2 0; 1 3]
+        @test d2.item_names == [:u, :v]
+        @test d2.item_levels == [["a", "b"], ["x", "y", "z"]]
+
+        # n_categories larger than what the data shows
+        d3 = LCAData([1 1; 2 1]; n_categories=[3, 2])
+        @test d3.n_categories == [3, 2]
+        @test d3.item_levels[1] == ["1", "2", "3"]
+
+        # Covariates: matrix or vector, with or without names
+        d4 = LCAData([1 2; 2 1; 1 1]; covariates=[1.0 0.0; 2.0 1.0; 3.0 0.0], covariate_names=[:age, :female])
+        @test d4.X == [1.0 1.0 0.0; 1.0 2.0 1.0; 1.0 3.0 0.0]
+        @test d4.covariate_names == [:intercept, :age, :female]
+        @test hascovariates(d4)
+        d5 = LCAData([1 2; 2 1; 1 1]; covariates=[true, false, true])
+        @test d5.X == [1.0 1.0; 1.0 0.0; 1.0 1.0]
+        @test d5.covariate_names == [:intercept, :x1]
+
+        # Validation errors
+        @test LCAData([1 2; 2 3]).n_categories == [2, 3]                                # inferred per column
+        @test_throws ArgumentError LCAData([1 2; 2 3]; n_categories=[2, 2])              # code above C_j
+        @test_throws ArgumentError LCAData([1 -1; 2 2])                                  # negative code
+        @test_throws ArgumentError LCAData([1 1; 1 1])                                   # one category
+        @test_throws ArgumentError LCAData([1 missing; 2 missing])                       # all-missing column
+        @test_throws ArgumentError LCAData(Matrix{Int}(undef, 3, 0))                     # no items
+        @test_throws ArgumentError LCAData([1 2; 2 1]; n_categories=[2])                 # length mismatch
+        @test_throws ArgumentError LCAData([1 2; 2 1]; n_categories=[1, 2])              # C < 2
+        @test_throws ArgumentError LCAData([1 2; 2 1]; item_names=[:a])                  # names length
+        @test_throws ArgumentError LCAData([1 2; 2 1]; item_names=[:a, :a])              # duplicate names
+        @test_throws ArgumentError LCAData([1 2; 2 1]; item_levels=[["a", "b"]])         # levels length
+        @test_throws ArgumentError LCAData([1 2; 2 1]; item_levels=[["a"], ["a", "b"]])  # label count
+        @test_throws ArgumentError LCAData([1 2; 2 1]; covariates=[1.0, 2.0, 3.0])       # X rows
+        @test_throws ArgumentError LCAData([1 2; 2 1]; covariates=[1.0, NaN])            # NaN
+        @test_throws ArgumentError LCAData([1 2; 2 1]; covariates=[1.0, Inf])            # Inf
+        @test_throws ArgumentError LCAData([1 2; 2 1]; covariates=[1.0, 2.0], covariate_names=[:a, :b])
+        @test_throws ArgumentError LCAData([1 2; 2 1]; covariates=[1.0 1.0; 2.0 2.0], covariate_names=[:a, :a])
+
+        # Direct (positional) constructor validation
+        @test_throws ArgumentError LCAData([1 2; 2 1], [2, 2], [:a, :b], [["1", "2"], ["1", "2"]],
+                                           [2.0 0.0; 1.0 0.0], [:intercept, :x])           # no intercept
+        @test_throws ArgumentError LCAData([1 2; 2 1], [2, 2], [:a, :b], [["1", "2"], ["1", "2"]],
+                                           ones(2, 2), [:x, :y])                          # first name
+        @test_throws ArgumentError LCAData([1 2; 2 1], [2, 2], [:a, :b], [["1", "2"], ["1", "2"]],
+                                           ones(2, 2), [:intercept])                      # names length
     end
 end

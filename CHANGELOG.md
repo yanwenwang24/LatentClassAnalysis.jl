@@ -6,13 +6,64 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
-The next breaking release, 0.3.0, is planned to add: a `fit(LCAModel, data, k)` entry point that accepts any
-Tables.jl source and returns a fitted model object; StatsAPI verbs (`loglikelihood`,
-`nobs`, `dof`, `aic`, `bic`, `coef`, `stderror`, ...); random restarts; missing values in
-indicators; covariates for class membership; standard errors and confidence intervals; a
-bootstrap likelihood-ratio test. The 0.2 functions `prepare_data`, `diagnostics!`, and
-`show_profiles` will keep working with deprecation warnings; `LCAModel(k, n_items,
-n_categories)` and `fit!` will be replaced.
+### 0.3.0 (breaking; in development on branch `v0.3.0`)
+
+Still to come in 0.3.0: covariates on class membership (latent class regression), standard
+errors and confidence intervals (`coef`, `vcov`, `stderror`, `confint`, `coeftable`, the
+`se`/`lower`/`upper` columns of `profiles`), and `simulate`, `bootstrap`,
+`bootstrap_lrt`.
+
+#### Added
+- `fit(LCAModel, data, k)` is the single entry point: EM with random restarts (`n_starts`
+  short runs, the `n_final` best continued to convergence), a numerically stable
+  log-sum-exp E-step, exact response-pattern aggregation, an `rng` keyword for
+  reproducible fits, `multithreaded=true` for parallel starts (results identical to the
+  serial run), and `init` for user-supplied starting values. `fit(LCAModel, data, 1:4)`
+  fits several class counts; `fit(LCAModel, table, items, k)` prepares a table first.
+- `LCAData`: the prepared-data container (codes, item names and level labels, optional
+  covariate matrix), built by `prepare_data` from any Tables.jl source or directly from a
+  code matrix. Accessors `nobs`, `size`, `hasmissing`, `nmissing`, `hascovariates`.
+- Missing responses in indicators: `missing` (code `0`) is skipped in the E-step under the
+  missing-at-random assumption; rows with all indicators missing get the class sizes as
+  posterior.
+- StatsAPI verbs on the fitted model: `nobs`, `dof`, `loglikelihood(m)`,
+  `loglikelihood(m, data)`, `aic`, `bic`, `aicc`, `isfitted`, plus `sbic`, `entropy(m;
+  relative)`, `diagnostics(m)`/`diagnostics(models)` (a `Vector{ModelDiagnostics}` is a
+  Tables.jl row table: `DataFrame(diagnostics(models))`).
+- `classify(m[, data])` for modal class assignments; `predict(m[, data])` for posterior
+  probabilities on the training data, an `LCAData`, or a table coded with the training
+  levels.
+- `profiles(m)`: item-response profiles as a row table; `show_profiles(m; io)`.
+- `LCAOptions` (estimation settings, stored in `model.options`) and `FitFlags`
+  (`model.flags`): non-convergence, boundary probabilities, empty classes and a
+  non-replicated best log-likelihood are collected into one warning and printed by `show`.
+- `n_classes == 1` is supported (closed form).
+- The identifiability check now uses the necessary condition
+  `(K - 1) + K·Σ(C_j - 1) ≤ ∏C_j - 1`.
+
+#### Changed
+- `LCAModel` is immutable and is returned by `fit`; its classes are ordered by decreasing
+  size. `beta` holds the multinomial-logit intercepts of the class sizes.
+- `prepare_data(table, items)` returns an `LCAData`; levels come from `DataAPI.levels`
+  (level order of a `CategoricalArray`, sorted values otherwise); unused levels are dropped
+  unless `drop_unused_levels=false`; `levels` fixes the level order per item.
+- `ModelDiagnostics` gained `n_classes`, `nobs`, `dof` and `converged` fields.
+- Convergence uses a relative tolerance `|ll - ll_old| ≤ tol·(1 + |ll|)` with `tol=1e-10`
+  and is checked before the M-step, so the reported log-likelihood, posterior and
+  parameters are consistent.
+- Dependencies: DataFrames and CategoricalArrays are no longer dependencies (Tables.jl and
+  DataAPI.jl are used instead); StatsAPI, StatsBase, Tables and DataAPI were added.
+
+#### Deprecated
+- `prepare_data(df, cols::Symbol...)` (returns the 0.2 tuple), `diagnostics!(m, data, ll)`
+  and `show_profiles(m, df, cols)` keep working with a deprecation warning.
+
+#### Removed
+- `LCAModel(n_classes, n_items, n_categories)` and `fit!(model, data)` throw an
+  `ArgumentError` pointing at `fit(LCAModel, data, k)`.
+- `predict(model, ::Matrix)` (which returned a tuple) throws an `ArgumentError`; wrap codes
+  in `LCAData(y)`.
+- The `n_obs < 300` warning and the item-count identifiability heuristic.
 
 The entries below are the pending 0.2.2 patch release.
 
