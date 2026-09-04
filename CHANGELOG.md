@@ -14,7 +14,7 @@ bootstrap likelihood-ratio test. The 0.2 functions `prepare_data`, `diagnostics!
 `show_profiles` will keep working with deprecation warnings; `LCAModel(k, n_items,
 n_categories)` and `fit!` will be replaced.
 
-The entries below are the pending 0.2.2 patch release.
+## [0.2.2] - 2026-09-04
 
 ### Added
 - Documentation site built with Documenter.jl: getting-started tutorial, methodology page,
@@ -80,7 +80,8 @@ The entries below are the pending 0.2.2 patch release.
 
 - Initial release: `prepare_data`, `LCAModel`, `fit!`, `diagnostics!`, `predict`.
 
-[Unreleased]: https://github.com/yanwenwang24/LatentClassAnalysis.jl/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/yanwenwang24/LatentClassAnalysis.jl/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/yanwenwang24/LatentClassAnalysis.jl/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/yanwenwang24/LatentClassAnalysis.jl/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/yanwenwang24/LatentClassAnalysis.jl/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/yanwenwang24/LatentClassAnalysis.jl/releases/tag/v0.1.0
