@@ -72,9 +72,8 @@ function _simulate(rng::AbstractRNG, m::LCAModel, n::Integer,
     return d, z
 end
 
-# Full design (n × P, intercept first) of a simulation from the user's `X`: the model's
-# own design when none is given and n == nobs(m); `nothing` for a model without
-# covariates, which accepts no `X`.
+# Full design (n × P, intercept first) for a simulation: the model's own when `X` is
+# omitted and n == nobs(m); `nothing` for a model without covariates, which accepts no `X`.
 function _simulation_design(m::LCAModel, n::Integer, X)
     if !hascovariates(m)
         X === nothing || throw(ArgumentError(
@@ -431,9 +430,8 @@ function StatsAPI.vcov(b::LCABootstrap)
     return _mask_boundary!(V, ParamLayout(b.model).free)
 end
 
-# Parameters on the boundary in the reference model carry no bootstrap information (every
-# replicate sits at the probability floor), so they are reported as NaN, as with the
-# observed-information covariance.
+# Boundary parameters of the reference model sit at the probability floor in every
+# replicate, so they are NaN here as in the observed-information covariance.
 function _mask_boundary!(V::AbstractMatrix, free::BitVector)
     for i in eachindex(free)
         free[i] && continue

@@ -338,14 +338,11 @@ function _observed_information(v::AbstractVector{<:Real}, layout::ParamLayout, w
     return info
 end
 
-# Covariance of the free parameters at v (n_total × n_total on the internal scale; NaN
-# rows and columns for parameters held fixed). A free parameter whose observed information
-# is numerically zero (see `_informative`) carries no information in the data: its score
-# is identically zero, as for the response logits of a class that is never observed with
-# that item. Such parameters are held fixed like boundary parameters (`layout.free` is
-# cleared for them) so that the remaining parameters keep finite standard errors instead
-# of the whole matrix becoming NaN. Returns (V, posdef, n_uninformative); when the
-# observed information of the remaining parameters is not positive definite V is all NaN.
+# Covariance of the free parameters at v (n_total × n_total, internal scale; NaN rows and
+# columns for fixed parameters). Free parameters with numerically zero information
+# (`_informative`, e.g. an item never observed in a class) are cleared from `layout.free`
+# and masked too, so that the others keep finite standard errors. Returns
+# (V, posdef, n_uninformative); V is all NaN when the information is not positive definite.
 function _covariance(v::AbstractVector{<:Real}, layout::ParamLayout, ws::LCAWorkspace)
     n = layout.n_total
     V = fill(NaN, n, n)
@@ -374,14 +371,12 @@ function _covariance(v::AbstractVector{<:Real}, layout::ParamLayout, ws::LCAWork
     return V, posdef, n_uninformative
 end
 
-# Relative threshold below which a diagonal entry of the observed information counts as
-# zero (relative to the largest finite diagonal entry, and at least 1).
+# Diagonal entries of the observed information below this fraction of the largest one
+# (and of 1) count as zero.
 const INFO_ZERO_TOL = 1e-12
 
-# Which parameters of an observed information matrix carry information: `false` for a
-# finite diagonal entry that is zero relative to `INFO_ZERO_TOL`. A NaN or infinite
-# diagonal entry counts as informative so that it is reported as a non-positive-definite
-# information matrix rather than silently masked.
+# `false` for parameters whose diagonal information is numerically zero. NaN or infinite
+# entries count as informative so that they surface as a non-positive-definite matrix.
 function _informative(info::AbstractMatrix{<:Real})
     nf = size(info, 1)
     scale = 1.0
@@ -655,16 +650,12 @@ end
 # Delta method: class sizes and item-response probabilities
 # ---------------------------------------------------------------------------------------
 
-# Delta-method covariance of the probabilities `p = softmax(γ)` of one block (a row of
-# item_probs, or the class sizes), given the logits' parameter indices `idx` (in category
-# order, the reference category `r` omitted) and the covariance matrix `V` of all
-# parameters. Only the free logits (`free[idx]`) enter: a logit held fixed on the boundary
-# has zero variance and zero covariance, so its Jacobian column drops out and the result is
-# the covariance of the remaining cells *conditional* on the boundary cell being fixed, as
-# Mplus and Latent GOLD report it. With `∂p_c/∂γ_d = p_c(δ_cd - p_d)` for the free `d`,
-# `S = J V_free J'`; the rows and columns of the boundary cells themselves are NaN. All NaN
-# when no logit is free (the reference cell is at 1 and every other cell at 0, or a class
-# block whose reference class has size 1) or when the free block of `V` is not finite.
+# Delta-method covariance of one softmax block `p` (a row of item_probs or the class
+# sizes) from the covariance `V` of its logits at indices `idx` (category order, reference
+# `r` omitted). Only the free logits enter, so the result is conditional on the boundary
+# cells being fixed (the Mplus / Latent GOLD convention): `S = J V_free J'` with
+# `∂p_c/∂γ_d = p_c(δ_cd - p_d)`, NaN rows and columns for the boundary cells, and all NaN
+# when no logit is free or the free block of `V` is not finite.
 function _softmax_covariance(p::AbstractVector{<:Real}, r::Integer, idx::AbstractUnitRange,
                              free::AbstractVector{Bool}, V::AbstractMatrix)
     C = length(p)
@@ -697,11 +688,9 @@ function _softmax_covariance(p::AbstractVector{<:Real}, r::Integer, idx::Abstrac
     return S
 end
 
-# Delta-method covariance of the class sizes (K × K). NaN without a covariance matrix and
-# for covariate models (whose class sizes are sample averages of the covariate-specific
-# membership probabilities); zero for a single class. A class whose size is on the boundary
-# (empty) gets NaN and the other classes conditional standard errors (see
-# `_softmax_covariance`).
+# Delta-method covariance of the class sizes (K × K): NaN without a covariance matrix or
+# with covariates (the sizes are then sample averages), zero for a single class; an empty
+# class gets NaN and the others conditional standard errors.
 function _class_covariance(class_probs::AbstractVector{<:Real}, layout::ParamLayout,
                            V::Union{Nothing,AbstractMatrix})
     K = layout.K
@@ -713,10 +702,8 @@ end
 _class_covariance(m::LCAModel, layout::ParamLayout, V::Union{Nothing,AbstractMatrix}) =
     _class_covariance(m.class_probs, layout, V)
 
-# Delta-method covariance of row k of item_probs[j] (C_j × C_j): with the row's logits γ_d
-# (d ≠ ref) and B = softmax, ∂B_c/∂γ_d = B_c(δ_cd - B_d). NaN without a covariance matrix;
-# a cell on the boundary gets NaN and the other cells of its row standard errors conditional
-# on it being fixed (see `_softmax_covariance`).
+# Delta-method covariance of row k of item_probs[j] (C_j × C_j); NaN without a covariance
+# matrix, and see `_softmax_covariance` for boundary cells.
 function _profile_covariance(m::LCAModel, layout::ParamLayout, V::Union{Nothing,AbstractMatrix},
                              j::Integer, k::Integer)
     V === nothing && return fill(NaN, layout.C[j], layout.C[j])
@@ -809,10 +796,9 @@ function profiles(m::LCAModel; level::Real=0.95, classes::Bool=false)
     return rows
 end
 
-# Confidence interval of one probability of a softmax block: the logit-scale interval when
-# its standard error is defined; the degenerate interval (p, p) for a cell held fixed on
-# the boundary while the other cells of its block have (conditional) standard errors; NaN
-# otherwise (no covariance matrix, or a block with no free logit).
+# Confidence interval of one probability: on the logit scale when its standard error is
+# defined, (p, p) for a boundary cell whose block has conditional standard errors, NaN
+# otherwise.
 function _profile_ci(p::Real, se::Real, z::Real, conditional::Bool)
     isnan(se) && conditional && !_interior(p) && return (Float64(p), Float64(p))
     return _logit_ci(p, se, z)

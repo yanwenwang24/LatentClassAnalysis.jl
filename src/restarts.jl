@@ -101,10 +101,9 @@ function _normalize_init!(θ::LCAParams)
     return θ
 end
 
-# Give θ the coefficient matrix the workspace expects: with covariates, a missing `coefs`
-# becomes a P × K matrix whose intercept row carries the log-odds of the class probabilities
-# (zero for uniform classes) and whose slopes are zero; without covariates, `coefs` is
-# dropped.
+# Give θ the coefficient matrix the workspace expects: none without covariates; with
+# covariates, a missing `coefs` starts with zero slopes and the log-odds of the class
+# probabilities as intercepts.
 function _seed_coefs!(θ::LCAParams, ws::LCAWorkspace)
     if !ws.covariates
         θ.coefs = nothing

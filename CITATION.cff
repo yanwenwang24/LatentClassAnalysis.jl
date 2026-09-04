@@ -5,7 +5,6 @@ title: "LatentClassAnalysis.jl: Latent class analysis in Julia"
 authors:
   - family-names: Wang
     given-names: Yanwen
-    email: yanwenwang@u.nus.edu
     orcid: "https://orcid.org/0000-0002-2269-5419"
 repository-code: "https://github.com/yanwenwang24/LatentClassAnalysis.jl"
 url: "https://yanwenwang24.github.io/LatentClassAnalysis.jl"
