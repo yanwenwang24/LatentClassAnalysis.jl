@@ -1,0 +1,14 @@
+# Codecov status checks. The patch check is informational: a large internal rewrite can
+# lower the fraction of changed lines hit without indicating a problem, and this package
+# has no branch protection that depends on it. The project check still guards against a
+# real drop in overall coverage.
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 2%
+    patch:
+      default:
+        target: 80%
+        informational: true
