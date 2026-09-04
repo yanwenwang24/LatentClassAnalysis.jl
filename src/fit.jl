@@ -1,20 +1,21 @@
 """
-    fit!(model::LCAModel, data::AbstractMatrix{<:Integer}; 
-         max_iter::Integer=1000, tol::Real=1e-6, verbose::Bool=false)
+    fit!(model::LCAModel, data::AbstractMatrix{<:Integer};
+         max_iter::Integer=10000, tol::Real=1e-6, verbose::Bool=false)
 
-Fit the LCA model using EM algorithm.
+Fit the LCA model in place using the EM algorithm, starting from the parameters currently
+stored in `model`.
 
 # Arguments
-- `model::LCAModel`: Model to fit
-- `data::AbstractMatrix{<:Integer}`: Prepared data matrix
-- `max_iter::Integer=1000`: Maximum number of iterations
-- `tol::Real=1e-6`: Convergence tolerance
-- `verbose::Bool=false`: Whether to print progress
+- `model::LCAModel`: Model to fit; its `class_probs` and `item_probs` are updated in place
+- `data::AbstractMatrix{<:Integer}`: Prepared data matrix with 1-based codes, as returned
+  by [`prepare_data`](@ref)
+- `max_iter::Integer=10000`: Maximum number of EM iterations
+- `tol::Real=1e-6`: Convergence tolerance on the absolute change in log-likelihood
+- `verbose::Bool=false`: Whether to print the log-likelihood at every iteration
 
 # Returns
 - `Float64`: Final log-likelihood
 """
-
 function fit!(
     model::LCAModel, data::AbstractMatrix{<:Integer};
     max_iter::Integer=10000, tol::Real=1e-6, verbose::Bool=false
@@ -42,7 +43,6 @@ function fit!(
         end
     end
 
-    n_obs = size(data, 1)
     old_ll = -Inf
 
     for iter in 1:max_iter
@@ -101,7 +101,4 @@ function fit!(
 
     verbose && println("Maximum iterations reached")
     return old_ll
-
-    diagnostics = diagnostics!(model, data, old_ll)
-    return diagnostics
 end

@@ -1,53 +1,85 @@
 name: CI
 on:
   push:
-    branches:
-      - main
-      - master
+    branches: [main]
     tags: ['*']
   pull_request:
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded runs on pull requests only: a tag push and a push to main
+  # must never cancel each other's documentation deployment.
+  cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
+
+permissions:
+  actions: write
+  contents: read
 
 jobs:
   test:
-    name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
+    name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ github.event_name }}
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.version == 'pre' }}
     strategy:
       fail-fast: false
       matrix:
-        version:
-          - '1.10'
-          - '1.11'
-          - 'nightly'
-        os:
-          - ubuntu-latest
-          - macos-latest
-          - windows-latest
-        arch:
-          - x64
+        # 'min' is the lower bound of the julia compat entry, 'lts' the current
+        # long-term-support release, '1' the latest stable release, 'pre' the
+        # latest pre-release (allowed to fail).
+        version: ['min', 'lts', '1']
+        os: [ubuntu-latest]
+        include:
+          - { version: '1', os: macos-latest }
+          - { version: '1', os: windows-latest }
+          - { version: 'pre', os: ubuntu-latest }
     steps:
       - uses: actions/checkout@v4
-      - uses: julia-actions/setup-julia@v1
+      - uses: julia-actions/setup-julia@v3
         with:
           version: ${{ matrix.version }}
-          arch: ${{ matrix.arch }}
-      - uses: julia-actions/cache@v1
+      - uses: julia-actions/cache@v3
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
       - uses: julia-actions/julia-processcoverage@v1
-      - uses: codecov/codecov-action@v3
+      - uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: lcov.info
           flags: unittests
           name: julia-${{ matrix.version }}-${{ matrix.os }}
-          fail_ci_if_error: true
-          verbose: true
-          threshold: 0.90
-          strict_coverage_check: false
-          coverage_report_type: patch
-          informational: true
+          fail_ci_if_error: false
+
+  docs:
+    name: Documentation
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write        # cache cleanup
+      contents: write       # push to gh-pages
+      pull-requests: read   # pull request previews
+      statuses: write       # deployment status on commits
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1'
+      - uses: julia-actions/cache@v3
+      - name: Install documentation dependencies
+        shell: julia --project=docs --color=yes {0}
+        run: |
+          using Pkg
+          Pkg.develop(PackageSpec(path = pwd()))
+          Pkg.instantiate()
+      - name: Build and deploy documentation
+        run: julia --project=docs --color=yes docs/make.jl
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DOCUMENTER_KEY: ${{ secrets.DOCUMENTER_KEY }}
+      - name: Run example scripts
+        shell: julia --project=examples --color=yes {0}
+        run: |
+          using Pkg
+          Pkg.develop(PackageSpec(path = pwd()))
+          Pkg.instantiate()
+          include(joinpath(pwd(), "examples", "example.jl"))
+          include(joinpath(pwd(), "examples", "example_childless.jl"))

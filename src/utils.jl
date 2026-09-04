@@ -1,79 +1,87 @@
 """
+    _used_levels(col)
+
+Sorted distinct values of a column. Code `i` of a prepared column corresponds to
+`_used_levels(col)[i]`. For a `CategoricalArray` the order is the level order and
+unused levels are not included.
+"""
+_used_levels(col) = sort(unique(col))
+
+"""
     prepare_data(df::DataFrame, cols::Symbol...)
 
-Prepare DataFrame for LCA by converting categorical columns to dummy variables if needed.
+Prepare a `DataFrame` for LCA by recoding each selected column to consecutive integer
+codes `1, 2, …, K`, where `K` is the number of distinct values in that column.
+
+Numeric columns are recoded by the rank of their sorted distinct values, so `0/1`, `1/2`,
+and even `1/3` codings all become `1/2`. String and categorical columns are coded by their
+sorted distinct values (level order for a `CategoricalArray`). Code `1` always corresponds
+to the smallest value or the first level.
 
 # Arguments
 - `df::DataFrame`: Input DataFrame
-- `cols::Symbol...`: Column names to use for analysis
-- `zero_based::Union{Nothing, Vector{Bool}}=nothing`: Specify which columns are 0/1 coded.
-    If nothing, automatically detect based on data.
+- `cols::Symbol...`: Names of the columns to use as manifest variables
+- `zero_based`: Deprecated and ignored; codes are always inferred from the data. It is
+  kept for backward compatibility and, if given, its length must still match `cols`.
 
 # Returns
-- `Matrix{Int}`: Prepared data matrix
-- `Vector{Int}`: Number of categories for each variable
-- `Vector{Bool}`: Whether each column was treated as zero-based
-"""
+- `Matrix{Int}`: Prepared data matrix (one row per observation, one column per item)
+- `Vector{Int}`: Number of categories of each item
 
+# Example
+```jldoctest
+julia> using LatentClassAnalysis, DataFrames
+
+julia> df = DataFrame(a = [0, 1, 1, 0], b = ["no", "yes", "yes", "no"], c = [1, 3, 3, 1]);
+
+julia> data, n_categories = prepare_data(df, :a, :b, :c);
+
+julia> data
+4×3 Matrix{Int64}:
+ 1  1  1
+ 2  2  2
+ 2  2  2
+ 1  1  1
+
+julia> n_categories
+3-element Vector{Int64}:
+ 2
+ 2
+ 2
+```
+"""
 function prepare_data(
     df::DataFrame, cols::Symbol...;
     zero_based::Union{Nothing,Vector{Bool}}=nothing
 )
-    # Initialize zero_based vector if not provided
-    if isnothing(zero_based)
-        zero_based = Vector{Bool}(undef, length(cols))
-        # Detect coding scheme for each column
-        for (i, col) in enumerate(cols)
-            if eltype(df[!, col]) <: Number
-                zero_based[i] = minimum(df[!, col]) == 0
-            else
-                zero_based[i] = false  # Categorical columns are 1-based by default
-            end
-        end
-    else
-        if length(zero_based) != length(cols)
-            throw(ArgumentError("Length of zero_based must match number of columns"))
-        end
+    if !isnothing(zero_based) && length(zero_based) != length(cols)
+        throw(ArgumentError("Length of zero_based must match number of columns"))
     end
 
     data = Matrix{Int}(undef, nrow(df), length(cols))
-    n_categories = Int[]
+    n_categories = Vector{Int}(undef, length(cols))
 
     for (i, col) in enumerate(cols)
-        if eltype(df[!, col]) <: Number
-            # For zero-based columns, shift values to 1-based
-            if zero_based[i]
-                data[:, i] = df[!, col] .+ 1
-                push!(n_categories, length(unique(df[!, col])))
-            else
-                data[:, i] = df[!, col]
-                push!(n_categories, length(unique(df[!, col])))
-            end
-        else
-            # Categorical columns are always 1-based
-            categories = sort(unique(df[!, col]))
-            data[:, i] = indexin(df[!, col], categories)
-            push!(n_categories, length(categories))
-        end
-
-        # Validate data
-        if any(x -> x < 1, view(data, :, i))
-            throw(ArgumentError("Column $(cols[i]): Invalid values after processing. " *
-                                "Check if zero_based specification is correct."))
-        end
+        levels = _used_levels(df[!, col])
+        data[:, i] = indexin(df[!, col], levels)
+        n_categories[i] = length(levels)
     end
 
     return data, n_categories
 end
 
 """
-Check model identifiability
+    check_identifiability(n_items, n_classes, n_categories)
+
+Warn when the model may not be identifiable. This is a rule of thumb: with `K` classes
+and items with at least `C` categories each, at least `2⌈log_C(K)⌉ + 1` items are
+recommended. Returns `true`.
 """
-function check_identifiability(n_items::Int, n_classes::Int, n_categories::Vector{Int})
+function check_identifiability(n_items::Integer, n_classes::Integer, n_categories::AbstractVector{<:Integer})
     # Use minimum categories as worst case bound
     min_cat = minimum(n_categories)
     required_items = 2 * ceil(Int, log(min_cat, n_classes)) + 1
-    
+
     if n_items < required_items
         @warn(
             "Model may not be identifiable. " *
@@ -85,20 +93,20 @@ function check_identifiability(n_items::Int, n_classes::Int, n_categories::Vecto
 end
 
 """
-    diagnostics!(model::LCAModel, data::Matrix{Int}, ll::Float64)
+    diagnostics!(model::LCAModel, data::AbstractMatrix{<:Integer}, ll::Real)
 
-Calculate model fit statistics including AIC, BIC, SBIC, and entropy.
+Calculate model fit statistics (AIC, BIC, sample-size adjusted BIC, and relative entropy)
+of a fitted model. Despite the `!`, neither `model` nor `data` is modified.
 
 # Arguments
 - `model::LCAModel`: Fitted model
-- `data::Matrix{Int}`: Data matrix
-- `ll::Float64`: Log-likelihood from model fitting
+- `data::AbstractMatrix{<:Integer}`: Data matrix used to fit the model
+- `ll::Real`: Log-likelihood returned by [`fit!`](@ref)
 
 # Returns
-- `ModelDiagnostics`: Structure containing fit statistics
+- [`ModelDiagnostics`](@ref): Structure containing the fit statistics
 """
-
-function diagnostics!(model::LCAModel, data::Matrix{Int}, ll::Float64)
+function diagnostics!(model::LCAModel, data::AbstractMatrix{<:Integer}, ll::Real)
     n_obs = size(data, 1)
 
     # Calculate number of parameters
@@ -140,12 +148,22 @@ function diagnostics!(model::LCAModel, data::Matrix{Int}, ll::Float64)
 end
 
 """
-    show_profiles(model::LCAModel, data::DataFrame, cols::Vector{Symbol}; 
-                 var_names::Union{Nothing, Vector{String}}=nothing,
-                 var_labels::Union{Nothing, Vector{Vector{String}}}=nothing,
-                 digits::Int=3)
+    show_profiles(model::LCAModel, data::DataFrame, cols::Vector{Symbol};
+                  var_names=nothing, var_labels=nothing, digits=3)
 
-Display the latent class profiles with aligned columns.
+Print the latent class profiles: the size of each class and, for every item, the
+probability of each response category within each class.
+
+# Arguments
+- `model::LCAModel`: Fitted model
+- `data::DataFrame`: The DataFrame passed to [`prepare_data`](@ref); used to recover
+  category labels
+- `cols::Vector{Symbol}`: The columns passed to [`prepare_data`](@ref), in the same order
+- `var_names::Union{Nothing,Vector{String}}`: Display names of the items (default: the
+  column names)
+- `var_labels::Union{Nothing,Vector{Vector{String}}}`: Display labels of the categories of
+  each item (default: the sorted distinct values of each column)
+- `digits::Int`: Number of decimal places of the printed percentages
 """
 function show_profiles(model::LCAModel, data::DataFrame, cols::Vector{Symbol};
     var_names::Union{Nothing,Vector{String}}=nothing,
@@ -155,18 +173,12 @@ function show_profiles(model::LCAModel, data::DataFrame, cols::Vector{Symbol};
     # Use DataFrame column names if var_names not provided
     display_names = isnothing(var_names) ? String[string(col) for col in cols] : var_names
 
-    # Extract or use provided category labels
+    # Use the same sorted distinct values as prepare_data, so labels line up with codes
     if isnothing(var_labels)
-        var_labels = Vector{Vector{String}}()
-        for (i, col) in enumerate(cols)
-            if eltype(data[!, col]) <: CategoricalValue
-                push!(var_labels, string.(levels(data[!, col])))
-            else
-                unique_vals = sort(unique(data[!, col]))
-                push!(var_labels, string.(unique_vals))
-            end
-        end
+        var_labels = [string.(_used_levels(data[!, col])) for col in cols]
     end
+
+    fmt = Printf.Format("%.$(digits)f%%")
 
     # Print header
     println("\nLatent Class Profiles")
@@ -202,7 +214,7 @@ function show_profiles(model::LCAModel, data::DataFrame, cols::Vector{Symbol};
             # Print probabilities
             for k in 1:model.n_classes
                 pct = model.item_probs[i][k, j] * 100
-                print(rpad(@sprintf("%.3f%%", pct), 12))
+                print(rpad(Printf.format(fmt, pct), 12))
             end
             println()
         end
