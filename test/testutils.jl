@@ -2,23 +2,29 @@
 # includes it (guarded) so that each file can be run on its own.
 
 using Random
+using LatentClassAnalysis
 
 """
-    simulate_lca(rng, n, class_probs, item_probs) -> (data::Matrix{Int}, classes::Vector{Int})
+    simulate_lca(rng, n, class_probs, item_probs; missing_rate=0.0)
+        -> (y::Matrix{Int}, classes::Vector{Int})
 
 Draw `n` observations from a latent class model with known parameters.
 
 - `class_probs`: vector of `K` class membership probabilities (must sum to one)
 - `item_probs`: vector of `J` matrices; `item_probs[j]` is `K × C_j` and row `k` holds the
   probability of each of the `C_j` response categories of item `j` given class `k`
+- `missing_rate`: probability that any single response is set to `0` (missing completely
+  at random), drawn after the responses so the same `rng` seed gives the same complete
+  data regardless of the rate
 
 All draws come from `rng`, so a `StableRNG` seed makes the data reproducible across Julia
-versions. `data` holds 1-based codes as expected by `fit!`, and `classes[i]` is the true
-class of observation `i`.
+versions. `y` holds 1-based codes (0 = missing) as expected by `LCAData`, and `classes[i]`
+is the true class of observation `i`.
 """
 function simulate_lca(rng::AbstractRNG, n::Integer,
                       class_probs::AbstractVector{<:Real},
-                      item_probs::AbstractVector{<:AbstractMatrix{<:Real}})
+                      item_probs::AbstractVector{<:AbstractMatrix{<:Real}};
+                      missing_rate::Real=0.0)
     K = length(class_probs)
     J = length(item_probs)
     isapprox(sum(class_probs), 1.0; atol=1e-8) ||
@@ -30,16 +36,47 @@ function simulate_lca(rng::AbstractRNG, n::Integer,
             throw(ArgumentError("rows of item_probs[$j] must sum to one"))
     end
 
-    data = Matrix{Int}(undef, n, J)
+    y = Matrix{Int}(undef, n, J)
     classes = Vector{Int}(undef, n)
     for i in 1:n
         k = _draw_category(rng, class_probs)
         classes[i] = k
         for j in 1:J
-            data[i, j] = _draw_category(rng, view(item_probs[j], k, :))
+            y[i, j] = _draw_category(rng, view(item_probs[j], k, :))
         end
     end
-    return data, classes
+    missing_rate > 0 && mcar!(rng, y, missing_rate)
+    return y, classes
+end
+
+"""
+    simulate_lca_reg(rng, X, beta, item_probs) -> (y::Matrix{Int}, classes::Vector{Int})
+
+Draw observations from a latent class regression model: row `i` of the `n × P` design `X`
+(intercept first) selects its class from `softmax(X[i, :]' * [0 beta])` with `beta` the
+`P × (K - 1)` coefficients of classes `2:K` against class 1, then answers every item from
+the class's response probabilities (as in [`simulate_lca`](@ref)).
+"""
+function simulate_lca_reg(rng::AbstractRNG, X::AbstractMatrix{<:Real},
+                          beta::AbstractMatrix{<:Real},
+                          item_probs::AbstractVector{<:AbstractMatrix{<:Real}})
+    n, P = size(X)
+    size(beta, 1) == P || throw(ArgumentError("beta must have $P rows, got $(size(beta, 1))"))
+    K = size(beta, 2) + 1
+    J = length(item_probs)
+    eta = X * beta
+    y = Matrix{Int}(undef, n, J)
+    classes = Vector{Int}(undef, n)
+    for i in 1:n
+        w = [1.0; exp.(eta[i, :])]
+        w ./= sum(w)
+        k = _draw_category(rng, w)
+        classes[i] = k
+        for j in 1:J
+            y[i, j] = _draw_category(rng, view(item_probs[j], k, :))
+        end
+    end
+    return y, classes
 end
 
 # Draw an index from a discrete distribution given by a probability vector.
@@ -54,10 +91,23 @@ function _draw_category(rng::AbstractRNG, probs::AbstractVector{<:Real})
 end
 
 """
+    mcar!(rng, y, rate) -> y
+
+Set every entry of the code matrix `y` to `0` (missing) independently with probability
+`rate`.
+"""
+function mcar!(rng::AbstractRNG, y::AbstractMatrix{Int}, rate::Real)
+    for i in eachindex(y)
+        rand(rng) < rate && (y[i] = 0)
+    end
+    return y
+end
+
+"""
     align_classes(est_item_probs, true_item_probs) -> Vector{Int}
 
 Find the permutation `perm` of the estimated classes that best matches the true classes,
-by brute force over all permutations (intended for `K ≤ 4`). The match is measured by the
+by brute force over all permutations (intended for `K ≤ 5`). The match is measured by the
 total absolute difference of the item response probabilities.
 
 `perm[k]` is the estimated class corresponding to true class `k`, so that
@@ -67,7 +117,7 @@ total absolute difference of the item response probabilities.
 function align_classes(est_item_probs::AbstractVector{<:AbstractMatrix{<:Real}},
                        true_item_probs::AbstractVector{<:AbstractMatrix{<:Real}})
     K = size(true_item_probs[1], 1)
-    K <= 4 || throw(ArgumentError("align_classes is meant for K ≤ 4 classes, got $K"))
+    K <= 5 || throw(ArgumentError("align_classes is meant for K ≤ 5 classes, got $K"))
     length(est_item_probs) == length(true_item_probs) ||
         throw(ArgumentError("est_item_probs and true_item_probs must have the same length"))
 
@@ -100,6 +150,52 @@ function _permutations(v::Vector{Int})
 end
 
 """
+    max_abs_error(model, perm, true_class_probs, true_item_probs) -> (Float64, Float64)
+
+Largest absolute error of the class sizes and of the item-response probabilities of a
+fitted model after aligning its classes with `perm` (see [`align_classes`](@ref)).
+"""
+function max_abs_error(model::LCAModel, perm::AbstractVector{<:Integer},
+                       true_class_probs::AbstractVector{<:Real},
+                       true_item_probs::AbstractVector{<:AbstractMatrix{<:Real}})
+    e_class = maximum(abs.(model.class_probs[perm] .- true_class_probs))
+    e_item = maximum(maximum(abs.(model.item_probs[j][perm, :] .- true_item_probs[j]))
+                     for j in eachindex(true_item_probs))
+    return e_class, e_item
+end
+
+"""
+    aligned_beta(model, perm) -> Matrix{Float64}
+
+Coefficients of `model` re-based to the class order `perm` (see [`align_classes`](@ref)):
+column `k - 1` of the result holds the log-odds coefficients of true class `k` against
+true class `1`, so it is comparable with the `beta` the data were simulated from.
+"""
+function aligned_beta(model::LCAModel, perm::AbstractVector{<:Integer})
+    P = size(model.beta, 1)
+    B = hcat(zeros(P), model.beta)[:, perm]
+    B .-= B[:, 1]
+    return B[:, 2:end]
+end
+
+"""
+    same_fit(a::LCAModel, b::LCAModel) -> Bool
+
+Whether two fitted models are bitwise identical in every estimated quantity.
+"""
+function same_fit(a::LCAModel, b::LCAModel)
+    return a.n_classes == b.n_classes &&
+           a.class_probs == b.class_probs &&
+           a.item_probs == b.item_probs &&
+           a.beta == b.beta &&
+           a.posterior == b.posterior &&
+           a.loglik == b.loglik &&
+           a.converged == b.converged &&
+           a.iterations == b.iterations &&
+           a.start_loglik == b.start_loglik
+end
+
+"""
     capture_stdout(f) -> String
 
 Run `f()` with `stdout` redirected and return everything it printed. `redirect_stdout`
@@ -117,3 +213,19 @@ function capture_stdout(f)
     end
     return fetch(reader)
 end
+
+# A well-separated two-class design shared by several test files: 6 binary items with
+# item-specific separation between 0.75 and 0.9 and class sizes (0.6, 0.4).
+const TWO_CLASS_PROBS = [0.6, 0.4]
+const TWO_CLASS_ITEMS = [[s 1-s; 1-s s] for s in (0.75, 0.8, 0.85, 0.9, 0.78, 0.88)]
+
+# A well-separated three-class design with items of 2, 3 and 4 categories.
+const THREE_CLASS_PROBS = [0.45, 0.35, 0.2]
+const THREE_CLASS_ITEMS = [
+    [0.9 0.1; 0.2 0.8; 0.6 0.4],
+    [0.7 0.2 0.1; 0.1 0.2 0.7; 0.15 0.7 0.15],
+    [0.7 0.1 0.1 0.1; 0.1 0.1 0.1 0.7; 0.1 0.7 0.1 0.1],
+    [0.85 0.15; 0.15 0.85; 0.85 0.15],
+    [0.8 0.1 0.1; 0.1 0.8 0.1; 0.1 0.1 0.8],
+    [0.1 0.1 0.7 0.1; 0.7 0.1 0.1 0.1; 0.1 0.1 0.1 0.7],
+]

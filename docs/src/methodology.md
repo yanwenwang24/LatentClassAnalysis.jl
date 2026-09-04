@@ -1,10 +1,11 @@
 # Methodology
 
-This page describes the model that LatentClassAnalysis.jl fits, how it is
-estimated, how the fit statistics reported by [`diagnostics!`](@ref) are defined,
-and what the identifiability warning means. It is written for applied researchers;
-each formula is followed by a one-sentence reading in plain language. For a
-book-length treatment see [collins2010](@cite).
+This page describes the model that LatentClassAnalysis.jl fits, how it is estimated,
+how missing responses and covariates are treated, how the number of classes is chosen,
+where the standard errors come from, and what the identifiability warning means. It is
+written for applied researchers; each formula is followed by a one-sentence reading in
+plain language, and every formula is the one the code implements. For a book-length
+treatment see [collins2010](@cite).
 
 ## The latent class model
 
@@ -21,7 +22,7 @@ sets of parameters:
   with ``\sum_{c=1}^{C_j} \rho_{jkc} = 1`` for every item ``j`` and class ``k``.
 
 In the package, `model.class_probs[k]` is ``\pi_k`` and `model.item_probs[j][k, c]`
-is ``\rho_{jkc}``.
+is ``\rho_{jkc}``. The classes are numbered by decreasing ``\pi_k``.
 
 The key assumption is **local independence**: within a class, the items are
 independent of each other. All the association between the items in the
@@ -43,10 +44,11 @@ p = (K - 1) + K \sum_{j=1}^{J} (C_j - 1)
 ```
 
 free parameters: ``K - 1`` class sizes, and for every class and item one fewer
-probability than there are categories. This ``p`` is used by the information
-criteria below.
+probability than there are categories. [`dof`](@ref) returns this ``p``, which the
+information criteria below use. (With covariates the first term becomes ``(K - 1)P``,
+see [Covariates on class membership](@ref covariates-model).)
 
-## Estimation by EM
+## [Estimation by EM](@id estimation)
 
 The parameters are estimated by maximum likelihood. The log-likelihood of the data
 is
@@ -58,8 +60,7 @@ is
 that is, the sum over respondents of the log of the mixture probability of their
 answer pattern. Because class membership is unobserved, the likelihood is
 maximised with the EM algorithm [dempster1977](@cite), which alternates between two
-steps until the log-likelihood stops improving. [`fit!`](@ref) implements exactly
-this iteration, starting from the parameters stored in the [`LCAModel`](@ref).
+steps until the log-likelihood stops improving.
 
 **E-step.** Given the current parameters, compute for every respondent the
 posterior probability of belonging to each class,
@@ -70,7 +71,9 @@ posterior probability of belonging to each class,
 ```
 
 This is Bayes' rule: a respondent's answers are weighed against each class's
-profile, and the result is the share of the evidence pointing to class ``k``.
+profile, and the result is the share of the evidence pointing to class ``k``. The
+package computes the numerators on the log scale and normalises with the
+log-sum-exp trick, so long response patterns (hundreds of items) do not underflow.
 
 **M-step.** Given the posteriors, update the parameters with the closed-form
 weighted proportions
@@ -85,24 +88,192 @@ weighted proportions
 Each class size becomes the average posterior probability of that class, and each
 item response probability becomes the proportion of respondents who gave that
 answer, with every respondent counted in proportion to how likely they are to be in
-the class.
+the class. Response probabilities are floored at ``10^{-10}`` so that no logarithm
+is ever taken of zero; estimates that end up within ``10^{-6}`` of 0 or 1 are counted
+in `model.flags.n_boundary`. EM increases the log-likelihood at every step, but it
+converges to a *local* maximum that depends on the starting values, which is why the
+package uses random restarts. The one-class model needs no EM: its response
+probabilities are the observed marginals of every item, and [`fit`](@ref) solves it in
+closed form.
 
-**Convergence.** After each M-step the log-likelihood is recomputed. The algorithm
-stops when the absolute change in the log-likelihood between two consecutive
-iterations is below `tol` (default ``10^{-6}``), or after `max_iter` iterations
-(default 10 000). With `verbose = true`, [`fit!`](@ref) prints the log-likelihood at
-every iteration and reports whether it converged. EM increases the log-likelihood at
-every step, but it converges to a *local* maximum that depends on the starting
-values; see [Limitations of the current version and roadmap](@ref limitations).
+### [Random restarts and local maxima](@id restarts)
 
-[`predict`](@ref) runs one more E-step with the final parameters and returns the
-posteriors ``\tau_{ik}`` together with the *modal* assignment
-``\arg\max_k \tau_{ik}`` of each respondent.
+The log-likelihood of a mixture model has several local maxima, and a single EM run
+can stop at any of them. The standard remedy is to run EM from many random starting
+values and keep the best solution. [`fit`](@ref) uses the two-stage scheme known as
+*emEM* [biernacki2003](@cite), the same as Mplus's `STARTS` option:
+
+1. Draw `n_starts` (default 20) sets of random starting values — uniform class sizes
+   and, for every item and class, response probabilities drawn from a flat Dirichlet
+   distribution — and run `short_iters` (default 50) EM iterations from each.
+2. Continue the `n_final` (default 4) starts with the highest log-likelihood to
+   convergence and keep the best.
+
+Short runs are cheap and quickly reveal which starting points are heading toward a
+poor local maximum, so most of the computation is spent on the promising ones. The
+log-likelihood of every start is stored in `model.start_loglik` (the short-run value
+for starts that were not continued), and the model records whether the best
+log-likelihood was reached by at least two of the continued starts
+(`model.flags.best_ll_replicated`; two values count as equal when they agree to a
+relative ``10^{-6}``). A maximum that is found only once is suspect: a better one may
+exist, and the estimates may be unstable. In that case `fit` warns, and the remedy is a
+larger `n_starts` and `n_final`. Every start is seeded from the `rng` keyword, so a fit
+is reproducible for a given generator, whether it is run serially or with
+`multithreaded = true`. User-supplied starting values (`init`) occupy the first
+start(s); the bootstrap procedures use this to warm-start their refits.
+
+After the best solution is chosen, the classes are sorted by decreasing size. This
+makes "class 1" the largest class in every fit rather than whichever class the
+winning start happened to label first, but the numbering still carries no
+substantive meaning.
+
+### Response-pattern aggregation
+
+Respondents with identical response patterns contribute identical terms to the
+log-likelihood and to the M-step sums. Before running EM, the package collapses the
+``n`` rows into the ``U \le n`` distinct patterns with their frequencies and runs every
+E- and M-step over the patterns only, weighting by frequency. This is exact — the
+log-likelihood, the parameters and the posteriors are identical to the row-by-row
+computation — and with a handful of binary items ``U`` is often far smaller than ``n``,
+so EM runs many times faster. The `aggregate` keyword of [`fit`](@ref) turns it off (it
+is off automatically once covariates enter the model, because rows then differ in their
+covariate values).
+
+### Convergence
+
+Every iteration starts with an E-step, which yields the log-likelihood ``\ell_t`` of the
+current parameters, and stops before the M-step when the *relative* change
+
+```math
+|\ell_t - \ell_{t-1}| \le \texttt{tol} \cdot (1 + |\ell_t|)
+```
+
+is met (default `tol = 1e-10`), or after `max_iter` M-steps (default 10 000). Because
+the check happens before the M-step, the reported log-likelihood, posterior and
+parameters all belong to the same iteration. A relative criterion is scale-free: it
+demands the same number of significant digits from a log-likelihood of ``-500`` as
+from one of ``-50\,000``. `model.converged` and `model.iterations` record the outcome
+for the selected start.
+
+## [Missing data](@id missing-data)
+
+Indicator responses may be missing. [`prepare_data`](@ref) codes `missing` as `0`,
+and the E-step simply leaves those items out of the product for that respondent:
+
+```math
+\tau_{ik} \propto \pi_k \prod_{j \,:\, y_{ij} \text{ observed}} \rho_{jk y_{ij}} .
+```
+
+A respondent who skipped an item is classified on the items they did answer. In the
+M-step the class sizes use every respondent, while the response probabilities of
+item ``j`` use only the respondents who answered it, both numerator and denominator:
+
+```math
+\rho_{jkc} = \frac{\sum_{i \,:\, y_{ij} \text{ observed}} \tau_{ik} \, \mathbf{1}\{y_{ij} = c\}}
+                  {\sum_{i \,:\, y_{ij} \text{ observed}} \tau_{ik}} .
+```
+
+This is the maximum-likelihood estimator under the *missing at random* (MAR)
+assumption [rubin1976](@cite): whether a response is missing may depend on the
+respondent's other observed responses, but not on the missing value itself. It is
+the same treatment as Mplus's default and it uses every partially observed row,
+unlike listwise deletion, which discards them and is unbiased only under the stronger
+*missing completely at random* assumption. The number of free parameters is
+unaffected. A row with every indicator missing is kept, contributes nothing to the
+item parameters, and receives the class sizes as its posterior. The MAR assumption
+cannot be tested from the data; if missingness plausibly depends on the unobserved
+answer itself (for example, refusing an income question because the income is high),
+the estimates may be biased whatever the software does. Covariates do not accept
+missing values: rows with a missing covariate must be dropped. The bootstrap
+procedures simulate complete data and re-apply the observed pattern of missing
+responses, which is exact under MCAR and standard practice under MAR. The
+[Missing data](@ref guide-missing-data) guide works through an example.
+
+## [Covariates on class membership](@id covariates-model)
+
+Covariates enter the model through the class membership probabilities, which become
+respondent-specific: with ``x_i`` the covariate vector of respondent ``i`` (a leading 1
+for the intercept, then ``P - 1`` covariates),
+
+```math
+\pi_k(x_i) = \frac{\exp(x_i' \beta_k)}{\sum_{l=1}^{K} \exp(x_i' \beta_l)},
+\qquad \beta_1 = 0 ,
+```
+
+a multinomial-logit regression of the class on the covariates with class 1 (the largest
+class) as reference. This is the *concomitant-variable* latent class model of
+[dayton1988](@cite), also called latent class regression. In words: the covariates shift
+the odds of belonging to each class, ``\log(\pi_k(x)/\pi_1(x)) = x'\beta_k``, and a
+coefficient is the change in the log-odds of class ``k`` against class 1 per unit of
+its covariate. The item-response probabilities are unchanged; the covariates say who
+is in each class, not what the classes look like. The model has
+
+```math
+p = (K - 1)\,P + K \sum_{j=1}^{J} (C_j - 1)
+```
+
+free parameters, and the log-likelihood is the one above with ``\pi_k(x_i)`` in place of
+``\pi_k``. In the package, `model.beta` is the ``P \times (K - 1)`` matrix of
+coefficients ``\beta_2, \dots, \beta_K`` on the raw scale of the covariates, and
+`model.class_probs` holds the sample averages ``\frac{1}{n}\sum_i \pi_k(x_i)``.
+
+**Estimation.** The E-step is unchanged except that ``\pi_k(x_i)`` replaces ``\pi_k``,
+and the M-step for the response probabilities is unchanged. The M-step for ``\beta``
+maximises the expected complete-data log-likelihood
+
+```math
+Q(\beta) = \sum_{i=1}^{n} \sum_{k=1}^{K} \tau_{ik} \log \pi_k(x_i; \beta),
+```
+
+a multinomial logistic regression of the posterior class probabilities on the
+covariates, which has no closed form. Rather than iterating it to convergence inside
+every M-step, the package takes **one damped Newton step** per EM iteration (a
+*generalized* EM algorithm), with gradient and Hessian
+
+```math
+g_k = \sum_{i=1}^{n} (\tau_{ik} - \pi_{ik})\, x_i,
+\qquad
+H_{kl} = -\sum_{i=1}^{n} \pi_{ik} (\delta_{kl} - \pi_{il})\, x_i x_i' ,
+\qquad k, l = 2, \dots, K .
+```
+
+The step is ``\Delta = (-H + \lambda I)^{-1} g`` with a small ridge
+``\lambda = 10^{-6} \max(1, \operatorname{tr}(-H)/\dim)`` that only guards the linear
+solve, capped at 10 per coefficient, and halved until ``Q`` does not decrease. Because
+every M-step increases ``Q``, the observed log-likelihood still increases at every
+iteration, and because the ridge and the cap affect only the path, the fixed point is
+the exact maximum-likelihood estimate. Internally the covariates are standardised (mean
+0, standard deviation 1) so that the step cap and the separation check work on a common
+scale; `beta` and its standard errors are mapped back to the raw scale, so the reported
+coefficients do not depend on the units in which a covariate is measured beyond the
+usual proportional change. A constant or collinear covariate is an error, and a
+coefficient exceeding 20 in absolute value on the standardised scale — the signature of
+*quasi-complete separation*, a covariate that determines class membership almost
+perfectly — raises the `coef_divergence` fit flag and leaves the standard errors
+undefined. Response-pattern aggregation is disabled, since rows with the same responses
+differ in their covariates. Random starts begin with all coefficients at zero (uniform
+class sizes).
+
+**One step or three?** Fitting the covariates together with the indicators — the
+*one-step* approach above — is the maximum-likelihood treatment and gives standard
+errors that account for the uncertainty of the classification. Its drawback is that
+the covariates take part in defining the classes, so adding a covariate can change the
+response profiles [vermunt2010](@cite). The *three-step* alternative (classify without
+covariates, then regress the assigned class on the covariates) keeps the classes fixed
+but underestimates the effects unless corrected for classification error; the package
+implements only the one-step model. The practical advice is to fit the unconditional
+model first, then the covariate model with `fit(LCAModel, d, k)` on data prepared with
+`covariates`, and to compare their profiles; `covariates = false` refits the
+unconditional model on the same data for a nested likelihood-ratio comparison. Because
+the restriction ``\beta_k = 0`` for the slopes is interior to the parameter space, the
+usual chi-squared distribution with ``(K - 1)(P - 1)`` degrees of freedom applies to that
+comparison, unlike the comparison of class counts below. The
+[Covariates](@ref guide-covariates) guide works through an example.
 
 ## [Choosing the number of classes](@id choosing-k)
 
 The number of classes ``K`` is not estimated; the analyst fits models with
-``K = 2, 3, \dots`` and compares them. [`diagnostics!`](@ref) reports the
+``K = 1, 2, 3, \dots`` and compares them. [`diagnostics`](@ref) reports the
 following quantities, where ``\ell`` is the maximised log-likelihood, ``p`` the
 number of free parameters defined above, and ``n`` the number of respondents.
 
@@ -129,7 +300,10 @@ lower values indicate a better trade-off between fit and parsimony, and the mode
 with the smallest value is preferred. They differ only in how heavily each extra
 parameter is penalised: AIC charges 2 per parameter, BIC charges ``\log n`` (about
 6.2 for ``n = 500``), and sBIC replaces ``n`` by ``(n + 2)/24``, which lies between
-the two for the sample sizes typical of survey research.
+the two for the sample sizes typical of survey research. The one-class model, which
+[`fit`](@ref) solves in closed form, is a useful baseline: it says how much of the
+association between the items the classes explain. [`aicc`](@ref), the small-sample
+correction of AIC, is also available.
 
 **Relative entropy.** With the posteriors ``\tau_{ik}`` from the E-step,
 
@@ -141,19 +315,164 @@ Entropy measures how cleanly respondents are separated into classes: ``E = 1`` m
 every respondent is assigned to one class with certainty, and ``E = 0`` means the
 posteriors are uniform and the classes tell us nothing about individuals
 [celeux1996](@cite). Values above roughly 0.8 are conventionally regarded as good
-separation.
+separation. [`entropy`](@ref)`(model; relative = false)` returns the raw posterior
+entropy in the numerator instead; the one-class model has ``E = 1`` by convention.
 
 **Guidance.** In the Monte Carlo study of [nylund2007](@cite), BIC was the most
 reliable of the information criteria for recovering the true number of classes in
-latent class models, and the bootstrap likelihood ratio test performed even better;
-AIC tended to select too many classes. A sensible default is therefore to choose by
-BIC, look at sBIC and AIC for a sense of how sensitive the choice is, and then ask
-whether the additional class in the next-larger model is substantively
-interpretable and large enough to matter. Entropy is a measure of classification
-quality, not of model fit: it should not be used to pick ``K``, but it tells you how
-much to trust the modal assignments returned by [`predict`](@ref). When entropy is
-low, analyses that use the class as a variable should carry the posterior
-probabilities forward rather than the hard assignments.
+latent class models, and the bootstrap likelihood-ratio test below performed even
+better; AIC tended to select too many classes. A sensible default is therefore to
+choose by BIC, look at sBIC and AIC for a sense of how sensitive the choice is, and
+then ask whether the additional class in the next-larger model is substantively
+interpretable and large enough to matter. Fit flags help here: a model whose extra
+class is empty, or that has many boundary probabilities, or whose best
+log-likelihood was found only once, is over-fitted. Entropy is a measure of
+classification quality, not of model fit: it should not be used to pick ``K``, but it
+tells you how much to trust the modal assignments returned by [`classify`](@ref).
+When entropy is low, analyses that use the class as a variable should carry the
+posterior probabilities from [`predict`](@ref) forward rather than the hard
+assignments. The [Model selection](@ref guide-model-selection) guide works through an
+example.
+
+### [Bootstrap likelihood-ratio test](@id blrt)
+
+Information criteria rank models by a penalised likelihood but offer no test. The
+natural test of ``K`` against ``K + 1`` classes is the likelihood-ratio statistic
+
+```math
+T = 2\,(\ell_{K+1} - \ell_K),
+```
+
+twice the gain in log-likelihood from the additional class. Its usual chi-squared
+reference distribution does not apply here: the ``K``-class model is obtained from the
+``(K + 1)``-class model by setting a class size to zero or making two classes
+identical, which places the null hypothesis on the boundary of the parameter space,
+where the regularity conditions of the chi-squared approximation fail.
+[mclachlan1987](@cite) proposed to obtain the reference distribution by simulation
+instead — the *parametric bootstrap* — and the Monte Carlo study of
+[nylund2007](@cite) found this bootstrap likelihood-ratio test (BLRT) to be the most
+accurate tool for recovering the number of classes in latent class models, ahead of
+BIC. [`bootstrap_lrt`](@ref) implements it:
+
+1. Fit the ``K``- and ``(K + 1)``-class models to the data and compute ``T``.
+2. Simulate ``B`` data sets from the fitted ``K``-class model, with the original sample
+   size, covariates and pattern of missing responses.
+3. Fit both models to every simulated data set and compute its statistic ``T_b``. The
+   ``T_b`` are draws from the distribution of ``T`` when the ``K``-class model is true.
+4. The p-value is the share of replicates at least as large as the observed statistic,
+   ```math
+   p = \frac{1 + \#\{b : T_b \ge T\}}{B + 1},
+   ```
+   where the observed data count as one further replicate. This form makes the test
+   exact for any ``B`` and keeps ``p`` above zero [davison1997](@cite).
+
+A small ``p`` says that the improvement from the extra class is larger than what ``K``
+classes would generate by chance, and favours ``K + 1`` classes; the usual procedure
+tests 1 against 2, 2 against 3, and so on, and stops at the first ``K`` that is not
+rejected. The **resolution** of the p-value is ``1/(B + 1)``: with ``B = 19`` the
+smallest attainable value is 0.05, with ``B = 99`` it is 0.01. Choose ``B`` with the
+significance level in mind, and use several hundred replicates when the p-value comes
+out close to the threshold. The **cost** is ``B`` fits of each model. The ``K``-class
+refits are warm-started from the fitted model (plus two random starts, all continued
+to convergence), and the ``(K + 1)``-class refits from the replicate's ``K``-class
+solution with its largest class split in two, plus `n_starts_boot` random starts of
+which `n_final_boot` are continued. The split start makes the ``(K + 1)``-class
+log-likelihood of every replicate at least that of its ``K``-class fit, up to the small
+perturbation that separates the two halves, so that ``T_b \ge 0``; a replicate that
+nevertheless ends below zero signals a local maximum and is counted in the
+`n_negative` field of the result with a warning. Because the replicate fits use fewer
+random starts than a careful analysis of the real data, a ``(K + 1)``-class replicate
+fit that misses its global maximum makes ``T_b`` too small and the test slightly
+liberal; raising `n_starts_boot` removes the effect at a proportional cost. The
+observed ``T`` has the opposite vulnerability: if the fitted ``(K + 1)``-class model is
+itself a local maximum, ``T`` is understated, which is why `bootstrap_lrt` warns when
+its best log-likelihood was not replicated across starts.
+
+Like the information criteria, the test assumes that the ``K``-class model is
+correctly specified, including local independence. With many respondents, small
+departures from the model suffice to reject every ``K``, and the substantive
+interpretability of the classes remains the final arbiter.
+
+## [Standard errors and confidence intervals](@id standard-errors)
+
+### Observed information
+
+The free parameters of the model are the multinomial-logit coefficients of the class
+membership model (without covariates, the log-odds ``\log(\pi_k/\pi_1)``) and, for
+every item and class, the log-odds of each response category against the class's
+modal category, ``\gamma_{jkc} = \log(\rho_{jkc} / \rho_{jkr})``. [`coef`](@ref)
+returns them in that order and [`coefnames`](@ref) labels them. Their covariance
+matrix is the inverse of the observed information matrix, the negative Hessian of the
+log-likelihood at the maximum-likelihood estimate: the score (gradient) is computed
+analytically from the posterior probabilities of the final E-step, and the Hessian by
+central finite differences of the score (step ``6 \times 10^{-6}`` relative to the
+parameter, symmetrised). [`vcov`](@ref), [`stderror`](@ref), [`confint`](@ref) and
+[`coeftable`](@ref) read it, [`informationmatrix`](@ref) returns the information
+itself, and `fit(...; se = :none)` skips the computation. When the information matrix
+is not positive definite — a weakly identified or non-converged model — `fit` warns and
+every standard error is `NaN`. The logit scale is chosen because the sampling
+distributions of logits are closer to normal than those of probabilities, so the Wald
+intervals ``\hat\gamma \pm z\,\mathrm{se}`` are more accurate there.
+
+Standard errors of the response probabilities and of the class sizes follow by the
+delta method: with ``\rho = \mathrm{softmax}(\gamma)`` within an item row,
+``\partial \rho_c / \partial \gamma_d = \rho_c(\delta_{cd} - \rho_d)``, so
+``\mathrm{Var}(\rho) = J\,\mathrm{Var}(\gamma)\,J'``. [`profiles`](@ref) reports these
+standard errors and confidence intervals computed on the logit scale (hence within
+``[0, 1]`` and asymmetric around the estimate). With covariates the class sizes are
+sample averages of the covariate-specific membership probabilities, for which no
+delta-method standard error is reported; the bootstrap below provides one. These
+standard errors are asymptotic and condition on the number of classes; comparing class
+counts is the job of the information criteria and the bootstrap likelihood-ratio test.
+
+### Boundary estimates
+
+A probability estimated at exactly 0 or 1 (within ``10^{-6}``) lies on the boundary of
+the parameter space, where the Wald approximation does not hold: the likelihood is not
+locally quadratic there, and the logit of the estimate is ``\mp\infty`` in principle
+(``-23`` in practice, the log of the floor). The corresponding logits are therefore
+held fixed when the information matrix is computed, their standard errors are reported
+as `NaN`, and the standard errors of the remaining probabilities in that row are
+**conditional** on the fixed value: with the boundary cell fixed at zero, the delta
+method runs over the free logits of the row only, so the reported uncertainty is that
+of the split among the observed categories. This is the convention of Mplus and Latent
+GOLD. For a binary item a boundary cell fixes the whole row and every entry of the row
+is `NaN`; an empty class is treated in the same way in the class-size block. A row with
+a boundary cell also has a degenerate interval ``[\hat\rho, \hat\rho]`` for that cell in
+[`profiles`](@ref).
+
+### [Bootstrap standard errors](@id bootstrap-se)
+
+The standard errors above rest on the asymptotic normality of the maximum-likelihood
+estimator, which can be a poor guide in small samples, for probabilities near 0 or 1,
+and for the class sizes of a model with covariates. [`bootstrap`](@ref) offers the
+resampling alternative of [efron1993](@cite): draw `n_boot` data sets of ``n`` rows by
+resampling the respondents with replacement (each with their covariates and their
+missing responses), refit the model to each, and take the standard deviation of the
+refitted parameters across the replicates as the standard error. With
+`parametric = true` the data sets are simulated from the fitted model instead
+([`simulate`](@ref)) and the pattern of missing responses of the original data is
+re-applied to them. Every refit is warm-started from the fitted model, so the
+replicates are cheap.
+
+Two details matter for mixture models. First, the classes of a refitted model come in
+an arbitrary order (*label switching*); before anything is averaged, the classes of
+every replicate are matched to those of the fitted model by the permutation that
+minimises the squared differences between the response probabilities and class sizes
+(solved exactly for up to seven classes). Second, the replicates are collected on the
+logit scale of [`coef`](@ref), where the sampling distributions are closer to
+symmetric, and the summaries of [`profiles`](@ref profiles(::LCABootstrap)) are
+computed after mapping every replicate back to probabilities, so that its *percentile
+intervals* — the 2.5th and 97.5th percentiles of the replicate probabilities at the 95%
+level — lie within ``[0, 1]`` without a delta-method approximation. No cell is held
+fixed in the bootstrap summaries: a boundary cell gets the spread of its replicates,
+which is meaningless on the logit scale (a replicate on the boundary sits at the floor)
+and only informative on the probability scale. With covariates the bootstrap also
+yields standard errors for the averaged class sizes, which the observed-information
+approach leaves undefined. A few hundred replicates are enough for standard errors;
+percentile intervals at the 95% level are better estimated with a thousand or more. The
+[Standard errors and the bootstrap](@ref guide-inference) guide compares the two kinds of
+standard error on an example.
 
 ## [Identifiability](@id identifiability)
 
@@ -164,63 +483,26 @@ Latent class models are not automatically identifiable [goodman1974](@cite). A
 independent cells in the contingency table of the items,
 
 ```math
-p \le \prod_{j=1}^{J} C_j - 1 ,
+(K - 1) + K \sum_{j=1}^{J} (C_j - 1) \le \prod_{j=1}^{J} C_j - 1 ,
 ```
 
 that is, the model cannot have more unknowns than the data have degrees of freedom.
-This condition is not sufficient: [allman2009](@cite) show that generic
-identifiability additionally requires enough items relative to the number of
-classes, roughly speaking that the items can be split into three groups each of
-which carries information about the classes.
-
-The package applies a simple **rule of thumb** in the [`LCAModel`](@ref)
-constructor (`check_identifiability`): with ``K`` classes and items that have at
-least ``C`` categories each (``C`` is the smallest number of categories among the
-items), at least
-
-```math
-J_{\min} = 2 \left\lceil \log_C K \right\rceil + 1
-```
-
-items are recommended. For binary items this gives 3 items for 2 classes, 5 items
-for 3 or 4 classes, and 7 items for 5 to 8 classes. If ``J < J_{\min}`` the
-constructor emits the warning *"Model may not be identifiable"*. The warning does not
-stop the model from being fitted, and it is a heuristic rather than a theorem: a
-model with fewer items may still be identifiable, and a model with enough items may
-still be poorly determined if the classes are weakly separated or some response
-categories are rare. When you see the warning, or when different starting values
-lead to noticeably different profiles at the same log-likelihood, treat the class
-solution with caution, prefer fewer classes, or add indicators.
-
-## [Limitations of the current version and roadmap](@id limitations)
-
-Version 0.2 implements the basic latent class model with the EM estimator. Please
-keep the following limitations in mind; each is scheduled for version 0.3.0.
-
-- **Single random start.** [`LCAModel`](@ref) draws one set of starting values from
-  the global random number generator and [`fit!`](@ref) runs EM once from there, so
-  the solution may be a local rather than the global maximum, and the class
-  numbering can change between seeds. Until random restarts are built in, fit each
-  model from several seeds and keep the fit with the highest log-likelihood (see
-  [Caveats](@ref) in the tutorial). *0.3.0 will add automatic random restarts and
-  an `rng` argument.*
-- **No missing data.** Every respondent must have a valid response on every item;
-  rows with missing values must be dropped before [`prepare_data`](@ref). *0.3.0 will
-  handle missing responses in the E-step under the missing-at-random assumption.*
-- **No covariates.** The model does not include predictors of class membership
-  (concomitant variables, [dayton1988](@cite)); if class membership is to be
-  related to covariates, do so after the fact with the posteriors from
-  [`predict`](@ref), bearing in mind the bias of naive three-step procedures
-  discussed by [vermunt2010](@cite). *0.3.0 will add covariates for the class
-  membership probabilities.*
-- **No standard errors.** The package reports point estimates only. *0.3.0 will add
-  standard errors for the class and item response probabilities.*
-- **No formal test for the number of classes.** Selection currently relies on the
-  information criteria above. *0.3.0 will add the parametric bootstrap likelihood
-  ratio test of [mclachlan1987](@cite), the procedure recommended by
-  [nylund2007](@cite).*
-- **`DataFrame` input only.** [`prepare_data`](@ref) accepts a `DataFrame`. *0.3.0
-  will accept any Tables.jl-compatible source.*
+[`fit`](@ref) checks this condition and warns *"Model may not be identified"* when
+it fails; the model is still fitted. Equality does not trigger the warning: for
+instance, two classes with three binary items have ``p = 7 = 2^3 - 1`` and are
+identified (the classic Lazarsfeld–Henry case). The condition is necessary but not
+sufficient: [allman2009](@cite) show that generic identifiability additionally
+requires enough items relative to the number of classes, roughly speaking that the
+items can be split into three groups each of which carries information about the
+classes. The check concerns the indicators; the ``(K - 1)(P - 1)`` covariate
+coefficients of a latent class regression are identified through the variation of the
+covariates whenever the class model itself is. A model that passes the check may still
+be poorly determined if the classes are weakly separated or some response categories
+are rare. The empirical symptoms are the fit flags: a best log-likelihood that is not
+replicated across starts, many boundary probabilities, an empty class, or an observed
+information matrix that is not positive definite. When you see them, or when different
+seeds lead to noticeably different profiles at the same log-likelihood, treat the
+class solution with caution, prefer fewer classes, or add indicators.
 
 ## References
 

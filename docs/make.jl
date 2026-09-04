@@ -34,9 +34,16 @@ makedocs(;
     pages=[
         "Home" => "index.md",
         "Getting started" => "tutorial.md",
+        "Guide" => [
+            "Model selection" => "guide/model_selection.md",
+            "Missing data" => "guide/missing_data.md",
+            "Covariates" => "guide/covariates.md",
+            "Standard errors and the bootstrap" => "guide/inference.md",
+        ],
         "Methodology" => "methodology.md",
         "Example: childlessness in Singapore" => "example_childless.md",
-        "API reference" => "api.md",
+        "Migrating from 0.2 to 0.3" => "migration.md",
+        "API reference" => ["api/core.md", "api/inference.md"],
         "Changelog" => "changelog.md",
     ],
     plugins=[bib],
