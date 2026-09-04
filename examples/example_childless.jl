@@ -10,72 +10,70 @@
 #   julia --project=examples examples/example_childless.jl
 
 using Arrow
-using CategoricalArrays
 using DataFrames
 using LatentClassAnalysis
-using Random
+using StableRNGs
+using Statistics
 
-Random.seed!(1024)
-
-# Load dataset (bundled next to this script)
+# Load the dataset (bundled next to this script)
 df = DataFrame(Arrow.Table(joinpath(@__DIR__, "childless_df.arrow")))
 
-# Step 1: Data Preparation
-data, n_categories = prepare_data(
-    df,
-    # Indicators for the partnership domain during respondents' 20s and 30s
-    :age_fmarry, # marriage timing ("no", "early", "norm", "late")
-    :marry_end, # whether marriage dissolved (0/1)
+# ---------------------------------------------------------------------------------------
+# Step 1: indicators and their level order
+# ---------------------------------------------------------------------------------------
+indicators = [
+    # Partnership domain during respondents' 20s and 30s
+    :age_fmarry,  # marriage timing ("no", "early", "norm", "late")
+    :marry_end,   # whether the marriage dissolved (0/1)
     :infertility, # whether infertility is reported (0/1)
-    # Indicators for the education domain
-    :edu, # education level ("low", "middle", "high")
-    # Indicators for the occupational domain during respondents' 20s and 30s
-    :ocp20s, # occupation in 20s ("Unemployed", "Blue-collared", "Semi-professional", "Professional")
-    :ocp30s, # ... in 30s
-    :flexible, # whether flexible work arrangements are available (0/1)
-    :familyleave # whether generous family leave is available (0/1)
-)
+    # Education domain
+    :edu,         # education level ("low", "middle", "high")
+    # Occupational domain during respondents' 20s and 30s
+    :ocp20s,      # occupation in 20s ("Unemployed", "Blue-collared", "Semi-professional", "Professional")
+    :ocp30s,      # ... in 30s
+    :flexible,    # whether flexible work arrangements are available (0/1)
+    :familyleave, # whether generous family leave is available (0/1)
+]
 
-# Step 2: Model Selection - Try different numbers of classes
-results = []
+# String columns are coded alphabetically unless the level order is given explicitly.
+# The order only affects the display of the profiles, not the fit.
+occupations = ["Unemployed", "Blue-collared", "Semi-professional", "Professional"]
+levels = Dict(:age_fmarry => ["no", "early", "norm", "late"],
+              :edu => ["low", "middle", "high"],
+              :ocp20s => occupations,
+              :ocp30s => occupations)
 
-for n_classes in 2:6
-    println("\nFitting model with $n_classes classes...")
+# ---------------------------------------------------------------------------------------
+# Step 2: fit models with two to six classes and choose by BIC
+# ---------------------------------------------------------------------------------------
+# fit(LCAModel, table, items, ks) prepares the table and fits one model per class count,
+# each from 20 random starts. Fits with many classes print a warning about response
+# probabilities on the boundary (0 or 1); that is expected with 493 observations.
+models = fit(LCAModel, df, indicators, 2:6; levels = levels, rng = StableRNG(1024))
 
-    # Initialize model
-    model = LCAModel(n_classes, size(data, 2), n_categories)
+selection = DataFrame(diagnostics(models))
+println("Model selection:")
+println(selection)
 
-    # Fit model and get log-likelihood
-    ll = fit!(model, data, verbose=true)
+best = models[argmin(selection.bic)]
+println("\nBest model by BIC has $(best.n_classes) classes")
+println(best)
 
-    # Calculate diagnostics
-    diag = diagnostics!(model, data, ll)
+# The best log-likelihood of every start; the maximum should be reached more than once
+println("\nLog-likelihood of the continued starts (best first):")
+println(sort(best.start_loglik; rev = true)[1:best.options.n_final])
 
-    # Store results
-    push!(results, (
-        n_classes = n_classes,
-        model = model,
-        diagnostics = diag
-    ))
+# ---------------------------------------------------------------------------------------
+# Step 3: profiles and class membership
+# ---------------------------------------------------------------------------------------
+show_profiles(best;
+              var_names = ["Marriage timing", "Marriage dissolved", "Infertility", "Education",
+                           "Occupation in 20s", "Occupation in 30s", "Flexible work", "Family leave"])
 
-    println("Log-likelihood: $(diag.ll)")
-    println("AIC: $(diag.aic)")
-    println("BIC: $(diag.bic)")
-    println("SBIC: $(diag.sbic)")
-    println("Entropy: $(diag.entropy)")
-end
+df.class = classify(best)
+df.max_posterior = vec(maximum(predict(best); dims = 2))
 
-# Find best model based on BIC
-best = argmin(r -> r.diagnostics.bic, results)
-best_model = best.model
-println("\nBest model has $(best.n_classes) classes based on BIC")
-
-# Step 3: Analyze best model
-# Show profiles
-show_profiles(best_model, df, [:age_fmarry, :marry_end, :infertility, :edu, :ocp20s, :ocp30s, :flexible, :familyleave])
-
-# Get predictions
-assignments, probabilities = predict(best_model, data)
-
-# Add predicted classes to original DataFrame
-df[!, :predicted_class] = assignments
+println("Class sizes and composition:")
+println(combine(groupby(df, :class), nrow => :n,
+                :female => mean => :share_female, :age => mean => :mean_age,
+                :max_posterior => mean => :mean_max_posterior))
