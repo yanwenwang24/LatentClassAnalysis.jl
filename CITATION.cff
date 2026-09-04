@@ -1,0 +1,36 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite both the package and the paper listed under preferred-citation."
+type: software
+title: "LatentClassAnalysis.jl: Latent class analysis in Julia"
+authors:
+  - family-names: Wang
+    given-names: Yanwen
+    email: yanwenwang@u.nus.edu
+    # orcid: "https://orcid.org/XXXX-XXXX-XXXX-XXXX"
+repository-code: "https://github.com/yanwenwang24/LatentClassAnalysis.jl"
+url: "https://yanwenwang24.github.io/LatentClassAnalysis.jl"
+license: MIT
+version: 0.2.1
+date-released: "2025-01-09"
+keywords:
+  - latent class analysis
+  - finite mixture models
+  - EM algorithm
+  - Julia
+  - social science
+# doi: 10.5281/zenodo.XXXXXXX
+preferred-citation:
+  type: article
+  title: "Diverse Pathways to Permanent Childlessness in Singapore: A Latent Class Analysis"
+  authors:
+    - family-names: Wang
+      given-names: Yanwen
+    - family-names: Teerawichitchainan
+      given-names: Bussarawan
+    - family-names: Ho
+      given-names: Christine
+  journal: "Advances in Life Course Research"
+  volume: 61
+  year: 2024
+  start: 100628
+  doi: 10.1016/j.alcr.2024.100628

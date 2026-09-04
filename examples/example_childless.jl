@@ -1,19 +1,24 @@
+# Latent class analysis of pathways to permanent childlessness in Singapore.
+#
+# This example replicates the article:
+#   Wang, Yanwen, Bussarawan Teerawichitchainan, and Christine Ho. 2024.
+#   "Diverse Pathways to Permanent Childlessness in Singapore: A Latent Class Analysis."
+#   Advances in Life Course Research 61:100628. doi: 10.1016/j.alcr.2024.100628.
+#
+# Run from any directory after setting up the examples environment once:
+#   julia --project=examples -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
+#   julia --project=examples examples/example_childless.jl
+
 using Arrow
 using CategoricalArrays
-using DataFrames, DataFramesMeta
+using DataFrames
 using LatentClassAnalysis
 using Random
 
-```
-This example replicated the article:
-Wang, Yanwen, Bussarawan Teerawichitchainan, and Christine Ho. 2024. 
-“Diverse Pathways to Permanent Childlessness in Singapore: A Latent Class Analysis.” 
-Advances in Life Course Research 61:100628. doi: 10.1016/j.alcr.2024.100628.
-```
 Random.seed!(1024)
 
-# Load dataset
-df = DataFrame(Arrow.Table("examples/childless_df.arrow"))
+# Load dataset (bundled next to this script)
+df = DataFrame(Arrow.Table(joinpath(@__DIR__, "childless_df.arrow")))
 
 # Step 1: Data Preparation
 data, n_categories = prepare_data(
@@ -23,7 +28,7 @@ data, n_categories = prepare_data(
     :marry_end, # whether marriage dissolved (0/1)
     :infertility, # whether infertility is reported (0/1)
     # Indicators for the education domain
-    :edu, # education level ("low", "medium", "high")
+    :edu, # education level ("low", "middle", "high")
     # Indicators for the occupational domain during respondents' 20s and 30s
     :ocp20s, # occupation in 20s ("Unemployed", "Blue-collared", "Semi-professional", "Professional")
     :ocp30s, # ... in 30s
@@ -61,9 +66,9 @@ for n_classes in 2:6
 end
 
 # Find best model based on BIC
-best_n_classes = argmin(k -> results[k].diagnostics.bic, keys(results)) + 1
-best_model = results[best_n_classes - 1].model
-println("\nBest model has $best_n_classes classes based on BIC")
+best = argmin(r -> r.diagnostics.bic, results)
+best_model = best.model
+println("\nBest model has $(best.n_classes) classes based on BIC")
 
 # Step 3: Analyze best model
 # Show profiles

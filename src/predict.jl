@@ -1,17 +1,17 @@
 """
     predict(model::LCAModel, data::AbstractMatrix{<:Integer})
 
-Predict class memberships for new data.
+Predict class memberships for (new) data.
 
 # Arguments
 - `model::LCAModel`: Fitted model
-- `data::AbstractMatrix{<:Integer}`: New data matrix
+- `data::AbstractMatrix{<:Integer}`: Data matrix with 1-based codes, prepared in the same
+  way as the data used to fit the model
 
 # Returns
-- `Vector{Int}`: Predicted class assignments
-- `Matrix{Float64}`: Class membership probabilities
+- `Vector{Int}`: Most likely class of each observation
+- `Matrix{Float64}`: Posterior class membership probabilities, one row per observation
 """
-
 function predict(
     model::LCAModel, data::AbstractMatrix{<:Integer}
 )
