@@ -451,8 +451,11 @@ const LCA = LatentClassAnalysis
         @testset "slow: bootstrap likelihood-ratio test" begin
             y8, _ = simulate_lca(StableRNG(52), 1000, [0.6, 0.4], [[0.8 0.2; 0.2 0.8] for _ in 1:6])
             d8 = LCAData(y8)
-            models = fit(LCAModel, d8, 1:3; rng=StableRNG(1), se=:none)
-            t12 = bootstrap_lrt(models[1], models[2]; n_boot=39, rng=StableRNG(53))
+            models = @test_logs (:warn, r"3-class fit.*on the boundary") match_mode = :any fit(
+                LCAModel, d8, 1:3; rng=StableRNG(1), se=:none)
+            # (a two-class fit to one-class replicates converges slowly, so some hit max_iter)
+            t12 = @test_logs (:warn, r"replicate fits did not converge") match_mode = :any bootstrap_lrt(
+                models[1], models[2]; n_boot=39, rng=StableRNG(53))
             @test t12.pvalue < 0.05
             @test t12.pvalue == 1 / 40
             @test all(t12.replicates .>= -1e-6) && t12.n_negative == 0
