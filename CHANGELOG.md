@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-04
+
 ### Changed
 - Standard errors: the item-response parameters of an empty class (size at most `1e-6`)
   are held fixed and reported as `NaN`, like boundary parameters, and so are parameters
@@ -248,7 +250,8 @@ marked **Breaking** change the signature, the return value, or the results of a 
 ### Added
 - Initial release: `prepare_data`, `LCAModel`, `fit!`, `diagnostics!`, `predict`.
 
-[Unreleased]: https://github.com/yanwenwang24/LatentClassAnalysis.jl/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/yanwenwang24/LatentClassAnalysis.jl/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/yanwenwang24/LatentClassAnalysis.jl/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/yanwenwang24/LatentClassAnalysis.jl/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/yanwenwang24/LatentClassAnalysis.jl/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/yanwenwang24/LatentClassAnalysis.jl/compare/v0.2.0...v0.2.1
