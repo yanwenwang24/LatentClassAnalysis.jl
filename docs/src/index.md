@@ -18,9 +18,10 @@ indicators are assumed to be independent of one another (*local independence*). 
 parameters are the size of each class and, for every item, the probability of each
 response category within each class. LatentClassAnalysis.jl estimates them by maximum
 likelihood with the EM algorithm run from many random starting values, accepts data from
-any Tables.jl source with missing responses in the indicators, and reports the
-information criteria and entropy used to choose the number of classes. See
-[Methodology](@ref) for the details.
+any Tables.jl source with missing responses in the indicators, lets covariates predict
+class membership, reports standard errors from the observed information matrix or the
+bootstrap, and offers the information criteria, entropy and bootstrap likelihood-ratio
+test used to choose the number of classes. See [Methodology](@ref) for the details.
 
 ## Installation
 
@@ -90,13 +91,20 @@ same generator and the same data always give the same model.
 
 - [Getting started](@ref): a complete walk-through on simulated data, from a
   `DataFrame` with mixed column types to choosing the number of classes, reading the
-  profiles, handling missing responses, and attaching class assignments to the data.
+  profiles, and attaching class assignments to the data.
+- The guide pages, one per topic, each a self-contained tutorial:
+  [Model selection](@ref guide-model-selection) (information criteria, random restarts,
+  the bootstrap likelihood-ratio test), [Missing data](@ref guide-missing-data),
+  [Covariates](@ref guide-covariates) (latent class regression), and
+  [Standard errors and the bootstrap](@ref guide-inference).
 - [Methodology](@ref): the model, the EM algorithm with random restarts, missing data,
-  the fit statistics, and identifiability, written for social scientists.
+  covariates, the fit statistics and the bootstrap likelihood-ratio test, standard
+  errors, and identifiability, written for social scientists.
 - [Example: childlessness in Singapore](@ref): a replication of a published
-  latent class analysis using the data bundled with the package.
-- [Upgrading from 0.2](@ref): every 0.2 call next to its 0.3 replacement, and what
-  changed in the results.
+  latent class analysis using the data bundled with the package, with a covariate model
+  and a bootstrap likelihood-ratio test.
+- [Migrating from 0.2 to 0.3](@ref): every 0.2 call next to its 0.3 replacement, and
+  what changed in the results.
 - API reference, in two pages: [data, fitting, prediction](@ref api-core) and
   [inference, bootstrap, deprecated](@ref api-inference): docstrings of every exported
   function and type.

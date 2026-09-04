@@ -10,11 +10,13 @@ Latent class analysis (LCA) in Julia.
 
 LCA identifies unobserved subgroups in a population from patterns of categorical
 responses. Typical uses are behavioral profiles, market segments, and life-course
-pathways. LatentClassAnalysis.jl fits latent class models by the EM algorithm and reports
-the fit indices needed to choose the number of classes. It was written for, and
-replicates, the analysis in Wang, Teerawichitchainan and Ho (2024), *Diverse Pathways to
-Permanent Childlessness in Singapore: A Latent Class Analysis*, Advances in Life Course
-Research 61:100628, [doi:10.1016/j.alcr.2024.100628](https://doi.org/10.1016/j.alcr.2024.100628).
+pathways. LatentClassAnalysis.jl fits latent class models by the EM algorithm with random
+restarts, handles missing responses and covariates, reports standard errors, and provides
+the fit indices and the bootstrap likelihood-ratio test needed to choose the number of
+classes. It was written for, and replicates, the analysis in Wang, Teerawichitchainan and
+Ho (2024), *Diverse Pathways to Permanent Childlessness in Singapore: A Latent Class
+Analysis*, Advances in Life Course Research 61:100628,
+[doi:10.1016/j.alcr.2024.100628](https://doi.org/10.1016/j.alcr.2024.100628).
 
 ## Features
 
@@ -23,24 +25,26 @@ Research 61:100628, [doi:10.1016/j.alcr.2024.100628](https://doi.org/10.1016/j.a
   string, and categorical indicators are recoded automatically, in the level order of a
   `CategoricalArray` or an order you supply
 - Maximum likelihood estimation by EM with random restarts (20 short runs, the best 4
-  continued to convergence), a numerically stable E-step, and an `rng` keyword for
-  reproducible fits
+  continued to convergence), a numerically stable E-step, exact response-pattern
+  aggregation, an `rng` keyword for reproducible fits, and optional multithreading
 - Missing responses in the indicators, handled in the E-step under the missing-at-random
   assumption
+- Covariates on class membership (latent class regression):
+  `prepare_data(df, items; covariates = [:age, :female])`, with the multinomial-logit
+  coefficients in `coeftable(model; which = :class)`
+- Standard errors and confidence intervals from the observed information matrix:
+  `stderror`, `confint` and `coeftable` on the logit scale, `profiles` and
+  `show_profiles` on the probability scale, with conditional standard errors when an
+  estimate is on the boundary
+- Bootstrap standard errors and percentile intervals (`bootstrap`), and simulation from a
+  fitted model (`simulate`)
+- The bootstrap likelihood-ratio test for the number of classes (`bootstrap_lrt`)
 - The StatsAPI verbs you expect from a fitted model: `fit`, `nobs`, `dof`,
-  `loglikelihood`, `aic`, `bic`, `aicc`, `predict`, plus `sbic`, `entropy`, and
-  `classify` for modal class assignments
+  `loglikelihood`, `aic`, `bic`, `aicc`, `coef`, `vcov`, `predict`, ..., plus `sbic`,
+  `entropy`, and `classify` for modal class assignments
 - A model-selection table: `fit(LCAModel, d, 1:5)` fits several class counts and
   `DataFrame(diagnostics(models))` tabulates log-likelihood, AIC, BIC, sBIC, and entropy
 - Class profiles as a printed report (`show_profiles`) or as a table (`profiles`)
-
-- Covariates for class membership (latent class regression) and standard errors and
-  confidence intervals from the observed information matrix (`coeftable`, and the
-  `se`/`lower`/`upper` columns of `profiles`)
-
-- Simulation from a fitted model (`simulate`), bootstrap standard errors and percentile
-  intervals (`bootstrap`), and the bootstrap likelihood-ratio test for the number of
-  classes (`bootstrap_lrt`)
 
 ## Installation
 
@@ -73,33 +77,39 @@ DataFrame(diagnostics(models))          # n_classes, nobs, dof, ll, aic, bic, sb
 best = models[argmin(bic.(models))]     # the two-class model
 
 # 4. Class profiles and class membership
-show_profiles(best)                     # class sizes and response probabilities per class
+show_profiles(best)                     # class sizes and response probabilities, each ± its standard error
+DataFrame(profiles(best; classes = true))   # the same numbers as a table, with confidence intervals
 df.class = classify(best)               # most likely class of every row
 posterior = predict(best)               # 500 × 2 matrix of posterior probabilities
+
+# 5. Is a third class more than chance? Bootstrap likelihood-ratio test of 2 against 3 classes
+test = bootstrap_lrt(d, 2; n_boot = 19, rng = StableRNG(2))
+pvalue(test)                            # well above 0.05: no evidence for a third class
 ```
 
 The three-class fit prints a warning that some response probabilities were estimated at
 exactly 0 or 1, which is one of the symptoms of asking for more classes than the data
-support. Fits are reproducible for a given `rng`; the
+support. Fits are reproducible for a given `rng`. The
 [tutorial](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/tutorial/) walks
-through the full workflow, including missing data and how to read the profiles.
-
-## Upgrading from 0.2
-
-Version 0.3 replaced `LCAModel(k, n_items, n_categories)` + `fit!` with
-`fit(LCAModel, data, k)`, `diagnostics!` with `diagnostics`, and the tuple returned by
-`predict` with `predict` (posterior) and `classify` (assignments). The
-[migration guide](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/migration/)
-lists every old call next to its replacement and explains what changed in the results.
+through the basic workflow, and the guide pages below take each step further.
 
 ## Documentation
 
-- [Getting started](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/tutorial/)
+- [Getting started](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/tutorial/):
+  prepare, fit, select, read the profiles, classify
+- Guide:
+  [Model selection](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/guide/model_selection/)
+  (information criteria, random restarts, the bootstrap likelihood-ratio test),
+  [Missing data](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/guide/missing_data/),
+  [Covariates](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/guide/covariates/)
+  (latent class regression), and
+  [Standard errors and the bootstrap](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/guide/inference/)
 - [Methodology](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/methodology/):
-  the model, EM with restarts, missing data, fit indices, identifiability
+  the model, EM with restarts, missing data, covariates, fit indices and the bootstrap
+  likelihood-ratio test, standard errors, identifiability
 - [Example: childlessness in Singapore](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/example_childless/):
   replication of the 2024 paper with the bundled data
-- [Upgrading from 0.2](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/migration/)
+- [Migrating from 0.2 to 0.3](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/migration/)
 - API reference: [data, fitting, prediction](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/api/core/)
   and [inference, bootstrap, deprecated](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/api/inference/)
 
@@ -110,6 +120,16 @@ julia --project=examples -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()
 julia --project=examples examples/example.jl
 julia --project=examples examples/example_childless.jl
 ```
+
+## Upgrading from 0.2
+
+Version 0.3 replaced `LCAModel(k, n_items, n_categories)` + `fit!` with
+`fit(LCAModel, data, k)`, `diagnostics!` with `diagnostics`, and the tuple returned by
+`predict` with `predict` (posterior) and `classify` (assignments); fits are reproduced by
+the `rng` keyword rather than `Random.seed!`, and `missing` is no longer a response
+category. The
+[migration guide](https://yanwenwang24.github.io/LatentClassAnalysis.jl/dev/migration/)
+lists every old call next to its replacement and explains what changed in the results.
 
 ## Citing
 
@@ -132,7 +152,8 @@ If you use this package, please cite the paper it was developed for and the soft
 
 R users may know [poLCA](https://cran.r-project.org/package=poLCA); commercial
 alternatives are Mplus and Latent GOLD. This package covers the core LCA workflow of those
-tools in pure Julia.
+tools in pure Julia: random restarts, missing data, covariates, standard errors, and the
+bootstrap likelihood-ratio test.
 
 ## License
 

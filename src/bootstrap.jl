@@ -417,12 +417,29 @@ _finite_rows(R::AbstractMatrix) = [i for i in 1:size(R, 1) if all(isfinite, view
 Bootstrap covariance matrix of [`coef`](@ref)`(b.model)`: the sample covariance of the
 aligned replicates (`dof × dof`). Replicates with a non-finite coefficient are left out;
 the matrix is all `NaN` when fewer than two replicates remain.
+Parameters that are on the boundary in `b.model` (a probability within `1e-6` of 0 or 1)
+are reported as `NaN`, as in the observed-information covariance: their replicates all sit
+at the probability floor and carry no information. This masking also applies to
+`stderror`, `confint` and `coeftable` of the bootstrap; `profiles(b)` summarizes the
+replicate probabilities directly and is not masked.
 """
 function StatsAPI.vcov(b::LCABootstrap)
     rows = _finite_rows(b.coefs)
     p = size(b.coefs, 2)
-    length(rows) >= 2 || return fill(NaN, p, p)
-    return cov(b.coefs[rows, :]; dims=1)
+    V = length(rows) >= 2 ? cov(b.coefs[rows, :]; dims=1) : fill(NaN, p, p)
+    return _mask_boundary!(V, ParamLayout(b.model).free)
+end
+
+# Parameters on the boundary in the reference model carry no bootstrap information (every
+# replicate sits at the probability floor), so they are reported as NaN, as with the
+# observed-information covariance.
+function _mask_boundary!(V::AbstractMatrix, free::BitVector)
+    for i in eachindex(free)
+        free[i] && continue
+        V[i, :] .= NaN
+        V[:, i] .= NaN
+    end
+    return V
 end
 
 """
@@ -456,7 +473,9 @@ function StatsAPI.confint(b::LCABootstrap; level::Real=0.95, method::Symbol=:per
     end
     α = (1 - level) / 2
     out = fill(NaN, p, 2)
+    free = ParamLayout(b.model).free
     for i in 1:p
+        free[i] || continue   # boundary parameter in the reference model: NaN
         col = filter(isfinite, view(b.coefs, :, i))
         length(col) >= 2 || continue
         out[i, 1] = quantile(col, α)

@@ -6,93 +6,136 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
-### 0.3.0 (breaking; in development on branch `v0.3.0`)
+Version 0.3.0 redesigns the package around a single entry point, `fit(LCAModel, data, k)`,
+which returns the fitted model, and the StatsAPI verbs. Every 0.2 call has a replacement;
+the "Migrating from 0.2 to 0.3" page of the documentation lists them side by side. Items
+marked **Breaking** change the signature, the return value, or the results of a 0.2 call.
 
-#### Added
-- Simulation and bootstrap: `simulate(m, n; rng, X, missing_mask)` draws data sets from
-  a fitted model (with its covariates and, optionally, a missingness pattern);
-  `bootstrap(m; n_boot, parametric, n_starts, multithreaded)` refits the model to
-  resampled rows or simulated data, aligns the class labels of every replicate to the
-  model, and returns an `LCABootstrap` with `vcov`, `stderror`, `confint(; method)`
-  (percentile or normal), `coeftable` and `profiles` (percentile intervals of the
-  replicate probabilities, including class sizes of covariate models); `bootstrap_lrt`
-  is the parametric bootstrap likelihood-ratio test of `K` against `K + 1` classes
-  (McLachlan 1987; Nylund et al. 2007) with `pvalue`, a `BootstrapLRT` result, and a
-  convenience form `bootstrap_lrt(d, k)` that fits both models. Replicates are seeded up
-  front, so serial and `multithreaded=true` runs agree bitwise.
-- Standard errors and confidence intervals: `fit` computes the covariance matrix of the
-  free parameters from the observed information matrix (analytic score, finite-difference
-  Hessian) unless `se=:none`. `coef`/`coefnames` give the parameters on the logit scale
-  (class-membership block first, then the item logits against each row's modal
-  category), `vcov`, `stderror`, `confint(m; level)`, `coeftable(m; level, which)` and
-  `informationmatrix` read them; `profiles` fills its `se`/`lower`/`upper` columns by the
-  delta method (logit-scale intervals) and `profiles(m; classes=true)` prepends the class
-  sizes; `show_profiles` prints `±se`. Parameters on the boundary (a probability within
-  1e-6 of 0 or 1) are held fixed and get `NaN` standard errors with a warning; the other
-  cells of a row with a boundary cell keep standard errors conditional on it being
-  fixed. The whole matrix is `NaN` when the observed information is not positive
-  definite or the coefficients diverged.
-- `aic`, `bic` and `aicc` have explicit, documented methods for `LCAModel`.
+### Added
+- `fit(LCAModel, data, k)`: maximum likelihood by EM with random restarts (`n_starts`
+  short runs of `short_iters` iterations, the `n_final` best continued to convergence,
+  the emEM scheme), a numerically stable log-sum-exp E-step, exact response-pattern
+  aggregation (`aggregate`), an `rng` keyword for reproducible fits, `multithreaded=true`
+  for parallel starts with results identical to the serial run, `init` for user-supplied
+  starting values, and `verbose`. `fit(LCAModel, data, 1:4)` fits several class counts and
+  `fit(LCAModel, table, items, k)` prepares a table first. `n_classes == 1` is supported
+  (closed form).
+- `LCAData`: the prepared-data container (integer codes, item names and level labels,
+  optional covariate matrix), built by `prepare_data(table, items; covariates, levels,
+  drop_unused_levels)` from any Tables.jl source — a `DataFrame`, a `NamedTuple` of
+  vectors, an Arrow table — or directly from a code matrix with `LCAData(y; ...)`. Levels
+  come from `DataAPI.levels` (the level order of a `CategoricalArray`, sorted values
+  otherwise), `levels` fixes the level order per item, and unused levels are dropped unless
+  `drop_unused_levels=false`. Accessors `nobs`, `size`, `hasmissing`, `nmissing`,
+  `hascovariates`.
+- Missing responses in the indicators: `missing` (code `0`) is skipped in the E-step under
+  the missing-at-random assumption; the class sizes use every row and the response
+  probabilities of an item the rows where it is observed; rows with all indicators missing
+  are kept (with a warning) and receive the class sizes as their posterior.
 - Covariates on class membership (latent class regression): `prepare_data(table, items;
-  covariates=[:age, :female])` or `LCAData(y; covariates=X)` and `fit(LCAModel, d, k)`
-  fit the multinomial-logit membership model `log(π_k(x)/π_1(x)) = x'β_k` by EM with one
-  damped Newton step per M-step; `model.beta` holds the coefficients on the raw scale,
-  `model.class_probs` the sample-averaged membership probabilities, `dof` counts
-  `(k - 1)·P` membership parameters, `predict`/`classify`/`loglikelihood` on new data use
-  its covariates, and `show` prints the coefficient table. `covariates=false` fits the
-  unconditional model on the same data; a constant or collinear covariate is an error and
+  covariates=[:age, :female])` or `LCAData(y; covariates=X)` and `fit(LCAModel, d, k)` fit
+  the multinomial-logit membership model `log(π_k(x)/π_1(x)) = x'β_k` (class 1, the largest
+  class, as reference) by EM with one damped Newton step per M-step; `model.beta` holds the
+  coefficients on the raw scale, `model.class_probs` the sample-averaged membership
+  probabilities, `dof` counts `(k - 1)·P` membership parameters, `predict`, `classify` and
+  `loglikelihood` on new data use its covariates, `coeftable(m; which=:class)` tabulates
+  the coefficients, and `show` prints them. `covariates=false` fits the unconditional model
+  on the same data for a nested comparison. A constant or collinear covariate is an error;
   quasi-complete separation raises the `coef_divergence` fit flag.
-- `fit(LCAModel, data, k)` is the single entry point: EM with random restarts (`n_starts`
-  short runs, the `n_final` best continued to convergence), a numerically stable
-  log-sum-exp E-step, exact response-pattern aggregation, an `rng` keyword for
-  reproducible fits, `multithreaded=true` for parallel starts (results identical to the
-  serial run), and `init` for user-supplied starting values. `fit(LCAModel, data, 1:4)`
-  fits several class counts; `fit(LCAModel, table, items, k)` prepares a table first.
-- `LCAData`: the prepared-data container (codes, item names and level labels, optional
-  covariate matrix), built by `prepare_data` from any Tables.jl source or directly from a
-  code matrix. Accessors `nobs`, `size`, `hasmissing`, `nmissing`, `hascovariates`.
-- Missing responses in indicators: `missing` (code `0`) is skipped in the E-step under the
-  missing-at-random assumption; rows with all indicators missing get the class sizes as
-  posterior.
+- Standard errors and confidence intervals: `fit` computes the covariance matrix of the
+  free parameters from the observed information matrix (analytic score, central
+  finite-difference Hessian) unless `se=:none`. `coef` and `coefnames` give the parameters
+  on the logit scale (class-membership block first, then the item logits against each
+  row's modal category); `vcov`, `stderror`, `confint(m; level)`, `coeftable(m; level,
+  which)` and `informationmatrix` read them. `profiles(m; level, classes)` returns the
+  class sizes and item-response probabilities with delta-method standard errors and
+  logit-scale confidence intervals, and `show_profiles` prints every percentage with `±`
+  its standard error. Parameters on the boundary (a probability within 1e-6 of 0 or 1) are
+  held fixed and get `NaN` standard errors with a warning; the other cells of a row with a
+  boundary cell keep standard errors conditional on it being fixed (the Mplus and Latent
+  GOLD convention). The whole matrix is `NaN` when the observed information is not positive
+  definite or the coefficients diverged.
+- Simulation and bootstrap: `simulate(m, n; rng, X, missing_mask)` draws data sets from a
+  fitted model; `bootstrap(m; n_boot, rng, parametric, n_starts, multithreaded)` refits the
+  model to resampled rows or simulated data, aligns the class labels of every replicate to
+  the model, and returns an `LCABootstrap` with `vcov`, `stderror`, `confint(; level,
+  method)` (percentile or normal), `coeftable` and `profiles` (standard deviations and
+  percentiles of the replicate probabilities, including the class sizes of covariate
+  models).
+- The bootstrap likelihood-ratio test for the number of classes: `bootstrap_lrt(null, alt;
+  n_boot, rng, n_starts_boot, n_final_boot, multithreaded)` (McLachlan 1987; Nylund et al.
+  2007) returns a `BootstrapLRT` with `pvalue`, and `bootstrap_lrt(d, k; ...)` fits both
+  models first. Bootstrap replicates are seeded up front, so serial and `multithreaded=true`
+  runs agree bitwise.
 - StatsAPI verbs on the fitted model: `nobs`, `dof`, `loglikelihood(m)`,
   `loglikelihood(m, data)`, `aic`, `bic`, `aicc`, `isfitted`, plus `sbic`, `entropy(m;
-  relative)`, `diagnostics(m)`/`diagnostics(models)` (a `Vector{ModelDiagnostics}` is a
-  Tables.jl row table: `DataFrame(diagnostics(models))`).
-- `classify(m[, data])` for modal class assignments; `predict(m[, data])` for posterior
-  probabilities on the training data, an `LCAData`, or a table coded with the training
-  levels.
-- `profiles(m)`: item-response profiles as a row table; `show_profiles(m; io)`.
-- `LCAOptions` (estimation settings, stored in `model.options`) and `FitFlags`
-  (`model.flags`): non-convergence, boundary probabilities, empty classes and a
-  non-replicated best log-likelihood are collected into one warning and printed by `show`.
-- `n_classes == 1` is supported (closed form).
-- The identifiability check now uses the necessary condition
-  `(K - 1) + K·Σ(C_j - 1) ≤ ∏C_j - 1`.
+  relative)` and `diagnostics(m)`/`diagnostics(models)`; a `Vector{ModelDiagnostics}` is a
+  Tables.jl row table, so `DataFrame(diagnostics(models))` is a model-selection table.
+- `classify(m[, data])` for modal class assignments; `predict(m[, data])` accepts the
+  model alone (its training data), an `LCAData`, or a table coded with the training levels.
+- `LCAOptions` (the estimation settings, stored in `model.options`) and `FitFlags`
+  (`model.flags`): non-convergence, boundary probabilities, empty classes, a best
+  log-likelihood reached by only one of the continued starts, and diverging covariate
+  coefficients are collected into one warning per fit and printed by `show`;
+  `model.start_loglik` records the log-likelihood of every start.
+- The identifiability check uses the necessary condition
+  `(K - 1) + K·Σ(C_j - 1) ≤ ∏C_j - 1` and warns only when it fails.
+- Documentation: four guide pages (model selection, missing data, covariates, standard
+  errors and the bootstrap), methodology sections on covariates, standard errors and the
+  bootstrap likelihood-ratio test, a migration page, and a covariate model and bootstrap
+  likelihood-ratio test on the childlessness example. Tests cover every feature; the slow
+  bootstrap tests are skipped with `LCA_SLOW_TESTS=false`.
 
-#### Changed
-- `LCAModel` is immutable and is returned by `fit`; its classes are ordered by decreasing
-  size. `beta` holds the multinomial-logit intercepts of the class sizes.
-- `prepare_data(table, items)` returns an `LCAData`; levels come from `DataAPI.levels`
-  (level order of a `CategoricalArray`, sorted values otherwise); unused levels are dropped
-  unless `drop_unused_levels=false`; `levels` fixes the level order per item.
-- `ModelDiagnostics` gained `n_classes`, `nobs`, `dof` and `converged` fields.
-- Convergence uses a relative tolerance `|ll - ll_old| ≤ tol·(1 + |ll|)` with `tol=1e-10`
-  and is checked before the M-step, so the reported log-likelihood, posterior and
-  parameters are consistent.
+### Changed
+- **Breaking:** `LCAModel` is immutable and returned by `fit`; the 0.2 workflow
+  `LCAModel(k, n_items, n_categories)` + `fit!` no longer exists (see Removed). Classes are
+  ordered by decreasing size, so class 1 is always the largest.
+- **Breaking:** `prepare_data(table, items)` takes a vector of column names and returns an
+  `LCAData` instead of a `(codes, n_categories)` tuple; the varargs form is deprecated.
+- **Breaking:** `missing` in an indicator is no longer coded as an additional category but
+  as a missing response (code `0`), so a column with `missing` values has one category
+  fewer than in 0.2 and the fit statistics are not comparable with 0.2 values. Replace
+  `missing` by an explicit label before `prepare_data` to keep the old behaviour.
+- **Breaking:** `predict` returns only the posterior probability matrix; the 0.2 tuple
+  `(assignments, probabilities)` is split into `classify` and `predict`.
+- **Breaking:** fits are reproduced by the `rng` keyword of `fit`, not by `Random.seed!`,
+  and a given seed no longer yields the 0.2 single-start solution: `fit` searches 20
+  starting values and typically reaches a higher log-likelihood.
+- **Breaking:** `ModelDiagnostics` gained the fields `n_classes`, `nobs`, `dof` and
+  `converged` (the 0.2 fields `ll`, `aic`, `bic`, `sbic`, `entropy` are unchanged).
+- Convergence uses the relative tolerance `|ll - ll_old| ≤ tol·(1 + |ll|)` with
+  `tol=1e-10` instead of an absolute `1e-6`, and is checked before the M-step, so the
+  reported log-likelihood, posterior and parameters belong to the same iteration. Fits
+  take more iterations and agree with 0.2 estimates only to roughly the old tolerance.
+- `show_profiles(model; var_names, var_labels, digits, io)` reads the item names and level
+  labels from the model and prints standard errors; `show(model)` prints the fit
+  statistics, class sizes, covariate coefficients and fit flags.
+- Unused levels of a `CategoricalArray` are dropped by default (`drop_unused_levels=false`
+  keeps them).
 - Dependencies: DataFrames and CategoricalArrays are no longer dependencies (Tables.jl and
   DataAPI.jl are used instead); StatsAPI, StatsBase, Tables, DataAPI and the Logging
   standard library were added.
 
-#### Deprecated
-- `prepare_data(df, cols::Symbol...)` (returns the 0.2 tuple), `diagnostics!(m, data, ll)`
-  and `show_profiles(m, df, cols)` keep working with a deprecation warning.
+### Deprecated
+- `prepare_data(df, cols::Symbol...; zero_based)` returns the 0.2 tuple with a deprecation
+  warning (`zero_based` is accepted and ignored); `diagnostics!(m, data, ll)` forwards to
+  `diagnostics(m)`; `show_profiles(m, df, cols; kwargs...)` forwards to
+  `show_profiles(m; kwargs...)`. All three will be removed in 0.4.0.
 
-#### Removed
-- `LCAModel(n_classes, n_items, n_categories)` and `fit!(model, data)` throw an
-  `ArgumentError` pointing at `fit(LCAModel, data, k)`.
-- `predict(model, ::Matrix)` (which returned a tuple) throws an `ArgumentError`; wrap codes
-  in `LCAData(y)`.
-- The `n_obs < 300` warning and the item-count identifiability heuristic.
+### Removed
+- **Breaking:** `LCAModel(n_classes, n_items, n_categories)` and `fit!(model, data)` throw
+  an `ArgumentError` pointing at `fit(LCAModel, data, k)`.
+- **Breaking:** `predict(model, ::Matrix)` and `classify(model, ::Matrix)` throw an
+  `ArgumentError`; wrap codes in `LCAData(y; n_categories=model.n_categories)`.
+- The `n_obs < 300` warning and the item-count identifiability heuristic, replaced by the
+  necessary condition above and by the fit flags.
+
+### Fixed
+- The E-step no longer underflows or takes `log(0)`: posteriors are computed on the log
+  scale with log-sum-exp and response probabilities are floored at 1e-10, so models with
+  hundreds of items or with empty cells return finite log-likelihoods.
+- The log-likelihood reported by a fit belongs to the returned parameters; 0.2 reported
+  the value of the previous iteration when `max_iter` was reached.
 
 ## [0.2.2] - 2026-09-04
 

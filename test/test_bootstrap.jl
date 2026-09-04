@@ -324,7 +324,8 @@ const LCA = LatentClassAnalysis
         br = @test_logs (:warn, r"replicate fit\(s\) failed") match_mode = :any bootstrap(mr; n_boot=20, rng=StableRNG(41))
         @test any(isnan, br.coefs) && !all(br.converged)
         @test all(i -> all(isnan, br.coefs[i, :]) || all(isfinite, br.coefs[i, :]), 1:20)
-        @test all(isfinite, vcov(br))
+        free_r = LatentClassAnalysis.ParamLayout(mr).free   # boundary parameters are NaN by design
+        @test all(isfinite, vcov(br)[free_r, free_r])
         @test occursin("excluded", sprint(show, br))
 
         # Argument validation and display
@@ -461,4 +462,33 @@ const LCA = LatentClassAnalysis
             @info "bootstrap likelihood-ratio test p-values" t12.pvalue t23.pvalue
         end
     end
+end
+
+@testset "bootstrap masks parameters on the boundary of the reference model" begin
+    rng = StableRNG(62)
+    n = 400
+    z = rand(rng, 1:2, n)
+    # item 1 never takes category 2 in class 1, so that cell ends on the boundary
+    y = Matrix{Int}(undef, n, 5)
+    for i in 1:n, j in 1:5
+        p = z[i] == 1 ? (j == 1 ? 1.0 : 0.85) : 0.15
+        y[i, j] = rand(rng) < p ? 1 : 2
+    end
+    d = LCAData(y; n_categories=fill(2, 5))
+    _, m = Test.collect_test_logs(() -> fit(LCAModel, d, 2; rng=StableRNG(1)))
+    free = LatentClassAnalysis.ParamLayout(m).free
+    @test !all(free)
+    _, b = Test.collect_test_logs(() -> bootstrap(m; n_boot=10, rng=StableRNG(2)))
+    se = stderror(b)
+    @test all(isnan, se[.!free])
+    @test all(isfinite, se[free])
+    ci = confint(b)
+    @test all(isnan, ci[.!free, :])
+    @test all(isfinite, ci[free, :])
+    @test all(isnan, confint(b; method=:normal)[.!free, :])
+    ct = coeftable(b)
+    @test length(ct.rownms) == length(se)
+    # the probability-scale summary is not masked
+    pr = profiles(b)
+    @test all(r -> isfinite(r.prob), pr)
 end

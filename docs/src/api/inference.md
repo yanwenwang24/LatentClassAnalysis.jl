@@ -51,7 +51,7 @@ pvalue
 ## Deprecated
 
 The three shims below work with a deprecation warning and will be removed in 0.4.0;
-the two constructors of the 0.2 workflow throw. See [Upgrading from 0.2](@ref).
+the two constructors of the 0.2 workflow throw. See [Migrating from 0.2 to 0.3](@ref).
 
 ```@docs
 prepare_data(::Any, ::Symbol...)

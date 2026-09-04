@@ -51,7 +51,7 @@ averaged over the sample. Response-pattern aggregation is disabled with covariat
 - `tol::Real=1e-10`: relative convergence tolerance, `|ll - ll_old| ≤ tol·(1 + |ll|)`
 - `se::Symbol=:hessian`: standard errors. `:hessian` computes the covariance matrix of
   the free parameters from the observed information matrix (analytic score, central
-  finite-difference Hessian; `2·dof` E-step passes) and stores it in `vcov`, which
+  finite-difference Hessian; two E-step passes per free parameter) and stores it in `vcov`, which
   [`vcov`](@ref), [`stderror`](@ref), [`confint`](@ref), [`coeftable`](@ref) and the
   `se`/`lower`/`upper` columns of [`profiles`](@ref) read. Parameters on the boundary
   (a probability within `1e-6` of 0 or 1) are held fixed and get `NaN` standard errors

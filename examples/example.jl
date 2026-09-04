@@ -58,9 +58,18 @@ println(best)
 # Classes are ordered by size, so class 1 is the largest.
 show_profiles(best)
 
-# The same numbers as a table (the se/lower/upper columns are filled once standard
-# errors are available; they are NaN in this version)
-println(first(DataFrame(profiles(best)), 6))
+# The same numbers as a table, with delta-method standard errors and confidence intervals
+println(first(DataFrame(profiles(best; classes = true)), 6))
+
+# The free parameters on the logit scale, with standard errors, Wald tests and intervals
+# (which = :class restricts the table to the class-membership block)
+println("\nResponse logits with standard errors:")
+display(coeftable(best; which = :items))
+
+# Is a third class more than chance? Bootstrap likelihood-ratio test of 2 against 3
+# classes (models[k] has k classes; 19 replicates resolve the 5% level)
+println("\nBootstrap likelihood-ratio test:")
+println(bootstrap_lrt(models[2], models[3]; n_boot = 19, rng = StableRNG(2)))
 
 # Posterior membership probabilities and modal class assignments
 posterior = predict(best)

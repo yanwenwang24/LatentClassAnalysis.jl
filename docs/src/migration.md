@@ -1,11 +1,16 @@
-# Upgrading from 0.2
+# Migrating from 0.2 to 0.3
 
 Version 0.3.0 redesigned the package around a single entry point, `fit(LCAModel,
 data, k)`, which returns a fitted model, and around the StatsAPI verbs (`nobs`,
 `dof`, `loglikelihood`, `aic`, `bic`, `predict`, ...). Data can come from any
 Tables.jl source, fits use random restarts, and missing responses are allowed. This
 page lists every 0.2 call next to its replacement, states the deprecation policy, and
-explains the changes in behaviour that affect results.
+explains the changes in behaviour that affect results. The features that have no 0.2
+counterpart — covariates on class membership, standard errors and confidence intervals,
+bootstrap standard errors, and the bootstrap likelihood-ratio test — are introduced in
+the guide pages: [Model selection](@ref guide-model-selection),
+[Missing data](@ref guide-missing-data), [Covariates](@ref guide-covariates) and
+[Standard errors and the bootstrap](@ref guide-inference).
 
 ## Before and after
 
@@ -136,3 +141,8 @@ work.
 **Levels of categorical columns.** Unused levels of a `CategoricalArray` are now
 dropped (`drop_unused_levels = false` keeps them), and the `levels` keyword fixes the
 order of any column's levels without converting it.
+
+**`show_profiles` prints standard errors.** Every percentage is followed by `±` its
+standard error, because `fit` computes the observed information matrix by default. Pass
+`se = :none` to `fit` to skip the computation and get the 0.2-style output; see
+[Standard errors and the bootstrap](@ref guide-inference).

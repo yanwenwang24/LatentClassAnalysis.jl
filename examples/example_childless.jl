@@ -63,6 +63,12 @@ println(best)
 println("\nLog-likelihood of the continued starts (best first):")
 println(sort(best.start_loglik; rev = true)[1:best.options.n_final])
 
+# Bootstrap likelihood-ratio test of the model with one class fewer against the selected
+# model (models[i] has i + 1 classes). 19 replicates resolve the p-value down to 0.05.
+K = best.n_classes
+println("\nBootstrap likelihood-ratio test of $(K - 1) against $K classes:")
+println(bootstrap_lrt(models[K - 2], models[K - 1]; n_boot = 19, rng = StableRNG(2024)))
+
 # ---------------------------------------------------------------------------------------
 # Step 3: profiles and class membership
 # ---------------------------------------------------------------------------------------
@@ -77,3 +83,18 @@ println("Class sizes and composition:")
 println(combine(groupby(df, :class), nrow => :n,
                 :female => mean => :share_female, :age => mean => :mean_age,
                 :max_posterior => mean => :mean_max_posterior))
+
+# ---------------------------------------------------------------------------------------
+# Step 4: who follows which pathway? Covariates on class membership
+# ---------------------------------------------------------------------------------------
+# A latent class regression: the class membership probabilities become a multinomial-logit
+# function of sex and age. Every coefficient is a log-odds against class 1, the largest
+# class. Covariates must be numeric columns without missing values (dummy-code `race` and
+# `nativity` first if you want to add them).
+d_cov = prepare_data(df, indicators; levels = levels, covariates = [:female, :age])
+m_cov = fit(LCAModel, d_cov, K; rng = StableRNG(1024))
+
+println("\nClass sizes with and without covariates (should be close):")
+println(round.(m_cov.class_probs; digits = 3), " ", round.(best.class_probs; digits = 3))
+println("\nClass-membership coefficients (log-odds against class 1):")
+display(coeftable(m_cov; which = :class))

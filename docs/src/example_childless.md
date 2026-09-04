@@ -21,7 +21,8 @@ size(df)
 
 The eight indicators used in the analysis are listed below. The remaining columns
 (`id`, `weights`, `female`, `age`, `race`, `nativity`, `sibs`) are not used as
-indicators on this page.
+indicators; `female` (0/1) and `age` (in years) serve as covariates of class membership
+further down.
 
 | Column        | Domain      | Meaning                                    | Values                                                        |
 |:--------------|:------------|:-------------------------------------------|:--------------------------------------------------------------|
@@ -102,6 +103,43 @@ best.flags.best_ll_replicated
 Had the best value appeared only once, `fit` would have warned and the model should
 be refitted with larger `n_starts` and `n_final`.
 
+### Testing the number of classes
+
+BIC chose five classes while AIC and sBIC kept decreasing. The bootstrap
+likelihood-ratio test ([`bootstrap_lrt`](@ref), see the
+[model selection](@ref guide-model-selection) guide) offers a third opinion: it simulates
+data sets from the smaller model and asks whether the observed gain of the extra class is
+more than such data produce by chance. `models` holds the fits for two to six classes, so
+`models[3]` and `models[4]` are the four- and five-class models. Nineteen replicates keep
+the page quick; they resolve the p-value only down to 0.05.
+
+```@example childless
+test45 = bootstrap_lrt(models[3], models[4]; n_boot = 19, rng = StableRNG(2024))
+```
+
+```@example childless
+test56 = bootstrap_lrt(models[4], models[5]; n_boot = 19, rng = StableRNG(2025))
+```
+
+Both tests reject: the fifth class improves the log-likelihood far more than any data set
+simulated from four classes, and so does the sixth relative to five (with 99 replicates
+the second p-value is 0.01, again at the floor). The test therefore sides with AIC and
+sBIC rather than with BIC. Two caveats temper this. The test assumes that the smaller
+model is exactly right, including local independence, and with real survey data small
+departures from the model are enough to make an extra class "significant"; and the fits
+with many classes are increasingly fragile — the number of response probabilities
+estimated at exactly 0 or 1 grows from four in the two-class model to 38 in the six-class
+model:
+
+```@example childless
+[m.flags.n_boundary for m in models]
+```
+
+With 493 respondents, a sixth class is mostly a class of empty cells. We keep the
+five-class solution selected by BIC and note that the statistical evidence does not rule
+out a sixth; the substantive interpretability of the classes, discussed below, is the
+final arbiter.
+
 ## Class profiles
 
 ```@example childless
@@ -148,6 +186,54 @@ little among the other classes. Class numbers follow class size, so identify the
 classes by these profiles rather than by their numbers. Readers can compare these
 profiles with the named pathways in [wang2024](@cite).
 
+## Who follows which pathway? Covariates
+
+The table of class composition above is descriptive. A latent class regression makes
+the relation between respondents' characteristics and their pathway part of the model:
+the class membership probabilities become a multinomial-logit function of covariates
+(see the [Covariates](@ref guide-covariates) guide). We use sex and age, the two
+covariates in the data that need no recoding (`race` and `nativity` are numeric codes and
+would have to be dummy-coded first).
+
+```@example childless
+d_cov = prepare_data(df, indicators; levels = levels, covariates = [:female, :age])
+m_cov = fit(LCAModel, d_cov, 5; rng = StableRNG(1024))
+```
+
+The class sizes and profiles of the covariate model are nearly identical to those of the
+unconditional five-class model, so the classes have kept their meaning and the
+coefficients can be read against the profiles above:
+
+```@example childless
+round.(m_cov.class_probs; digits = 3), round.(best.class_probs; digits = 3)
+```
+
+```@example childless
+coeftable(m_cov; which = :class)
+```
+
+Every coefficient is a log-odds against class 1, the largest class (never married,
+middle or high education, semi-professional work). Women are much less likely than men to
+be in class 2 (never married, low education, blue-collar work: the odds ratio is
+``\exp(-1.85) \approx 0.16``), and also less likely to be in classes 3 and 4; the
+respondents in class 2 are older (about 5% higher odds per year of age) and those in class
+3 (never married, high education, professional work) younger. Class 5, the only class
+whose members married, does not differ from class 1 by sex or age. The eight slopes
+together improve the log-likelihood by a wide margin:
+
+```@example childless
+m_nocov = fit(LCAModel, d_cov, 5; rng = StableRNG(1024), covariates = false)
+2 * (loglikelihood(m_cov) - loglikelihood(m_nocov)), dof(m_cov) - dof(m_nocov)
+```
+
+Three caveats. This is a one-step model, so the covariates take part in defining the
+classes; the check above that the class sizes did not move is the reason to trust the
+comparison with the unconditional profiles. In a cross-section, age is also birth cohort,
+and the age coefficients mix the two. And the standard errors of many item-response
+probabilities are undefined because those probabilities are on the boundary (the fit
+warns; `coeftable(m_cov)` shows the `NaN` rows), while every class-membership coefficient
+has a standard error.
+
 ## Differences from the published analysis
 
 - **Number of classes.** With random restarts, the four continued starts of every
@@ -167,8 +253,11 @@ profiles with the named pathways in [wang2024](@cite).
 d = prepare_data(df, indicators; levels = levels)
 ```
 
-- **No covariates.** Any analysis in the article that relates class membership to
-  other characteristics is not reproduced here. The columns `female`, `age`, `race`,
-  `nativity` and `sibs` are in the data set for that purpose (`prepare_data(df,
-  indicators; covariates = [...])`). Standard errors of the profiles are available
-  from `profiles(best)`; the article's are not compared here because of the weights.
+- **Covariates.** The latent class regression above uses `female` and `age` only, in a
+  one-step model; any analysis in the article that relates the pathways to other
+  characteristics is not reproduced. The columns `race`, `nativity` and `sibs` are in
+  the data set for that purpose (dummy-code the first two before passing them to
+  `covariates`).
+- **Standard errors.** Those of the profiles are available from `profiles(best)` and
+  printed by `show_profiles`; the article's are not compared here because of the
+  weights.
