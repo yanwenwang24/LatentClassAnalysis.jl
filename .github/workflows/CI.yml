@@ -81,5 +81,5 @@ jobs:
           using Pkg
           Pkg.develop(PackageSpec(path = pwd()))
           Pkg.instantiate()
-          include("examples/example.jl")
-          include("examples/example_childless.jl")
+          include(joinpath(pwd(), "examples", "example.jl"))
+          include(joinpath(pwd(), "examples", "example_childless.jl"))

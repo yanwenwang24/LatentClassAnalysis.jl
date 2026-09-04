@@ -65,7 +65,7 @@ errors and confidence intervals (`coef`, `vcov`, `stderror`, `confint`, `coeftab
   in `LCAData(y)`.
 - The `n_obs < 300` warning and the item-count identifiability heuristic.
 
-The entries below are the pending 0.2.2 patch release.
+## [0.2.2] - 2026-09-04
 
 ### Added
 - Documentation site built with Documenter.jl: getting-started tutorial, methodology page,
@@ -131,7 +131,8 @@ The entries below are the pending 0.2.2 patch release.
 
 - Initial release: `prepare_data`, `LCAModel`, `fit!`, `diagnostics!`, `predict`.
 
-[Unreleased]: https://github.com/yanwenwang24/LatentClassAnalysis.jl/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/yanwenwang24/LatentClassAnalysis.jl/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/yanwenwang24/LatentClassAnalysis.jl/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/yanwenwang24/LatentClassAnalysis.jl/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/yanwenwang24/LatentClassAnalysis.jl/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/yanwenwang24/LatentClassAnalysis.jl/releases/tag/v0.1.0
