@@ -10,7 +10,7 @@ authors:
 repository-code: "https://github.com/yanwenwang24/LatentClassAnalysis.jl"
 url: "https://yanwenwang24.github.io/LatentClassAnalysis.jl"
 license: MIT
-version: 0.2.2
+version: 0.3.0
 date-released: "2026-09-04"
 keywords:
   - latent class analysis

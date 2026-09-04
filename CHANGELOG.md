@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format foll
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-04
+
 Version 0.3.0 redesigns the package around a single entry point, `fit(LCAModel, data, k)`,
 which returns the fitted model, and the StatsAPI verbs. Every 0.2 call has a replacement;
 the "Migrating from 0.2 to 0.3" page of the documentation lists them side by side. Items
@@ -203,7 +205,8 @@ marked **Breaking** change the signature, the return value, or the results of a 
 
 - Initial release: `prepare_data`, `LCAModel`, `fit!`, `diagnostics!`, `predict`.
 
-[Unreleased]: https://github.com/yanwenwang24/LatentClassAnalysis.jl/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/yanwenwang24/LatentClassAnalysis.jl/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/yanwenwang24/LatentClassAnalysis.jl/compare/v0.2.2...v0.3.0
 [0.2.2]: https://github.com/yanwenwang24/LatentClassAnalysis.jl/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/yanwenwang24/LatentClassAnalysis.jl/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/yanwenwang24/LatentClassAnalysis.jl/compare/v0.1.0...v0.2.0
