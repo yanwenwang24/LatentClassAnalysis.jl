@@ -134,7 +134,7 @@ function LCAData(y::AbstractMatrix{<:Union{Missing,Integer}};
         C = Int.(n_categories)
         for j in 1:J
             col = view(codes, :, j)
-            if n > 0 && any(==(0), col) && maximum(col) <= 1
+            if n > 0 && any(==(0), col) && any(==(1), col) && maximum(col) <= 1
                 @warn "column $j contains only the codes 0 and 1; 0 is the missing code, so if these " *
                       "data are 0/1-coded shift them by one or use prepare_data"
             end
@@ -143,6 +143,8 @@ function LCAData(y::AbstractMatrix{<:Union{Missing,Integer}};
     levels = item_levels === nothing ? [string.(1:c) for c in C] :
              [String.(collect(l)) for l in item_levels]
     if covariates === nothing
+        covariate_names === nothing ||
+            throw(ArgumentError("covariate_names were given but no covariates"))
         X = ones(n, 1)
         cnames = [:intercept]
     else
@@ -311,9 +313,6 @@ struct FitFlags
     coef_divergence::Bool
 end
 
-_clean(f::FitFlags) = f.converged && f.n_boundary == 0 && isempty(f.empty_classes) &&
-                      f.best_ll_replicated && !f.coef_divergence
-
 """
     LCAModel <: StatsAPI.StatisticalModel
 
@@ -375,6 +374,10 @@ end
 
 hasmissing(m::LCAModel) = hasmissing(m.data)
 nmissing(m::LCAModel) = nmissing(m.data)
+
+# Coefficient matrix `[0 beta]` (P × K, class 1 the zero reference column) on the raw
+# covariate scale.
+_raw_coefs(m::LCAModel) = hcat(zeros(size(m.beta, 1)), m.beta)
 hascovariates(m::LCAModel) = size(m.beta, 1) > 1
 
 # ---------------------------------------------------------------------------------------

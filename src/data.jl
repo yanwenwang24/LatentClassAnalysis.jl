@@ -67,6 +67,9 @@ function prepare_data(table, items::AbstractVector{<:Union{Symbol,AbstractString
     available = collect(Tables.columnnames(cols))
     user_levels = levels === nothing ? Dict{Symbol,Any}() :
                   Dict{Symbol,Any}(Symbol(k) => v for (k, v) in pairs(levels))
+    unknown = [k for k in keys(user_levels) if !(k in item_names)]
+    isempty(unknown) || throw(ArgumentError(
+        "levels has entries for $unknown, which are not among the items $item_names"))
 
     J = length(item_names)
     n = -1

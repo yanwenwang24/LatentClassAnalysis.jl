@@ -112,10 +112,23 @@ same generator and the same data always give the same model.
 
 ## Citing
 
-If you use LatentClassAnalysis.jl in published work, please cite the software
-(LatentClassAnalysis.jl, Yanwen Wang, <https://github.com/yanwenwang24/LatentClassAnalysis.jl>)
-and, if it is relevant to your application, the article for which the package was
-originally developed [wang2024](@cite):
+If you use LatentClassAnalysis.jl in published work, please cite the software; the
+`CITATION.cff` file in the repository carries the metadata, and GitHub's "Cite this
+repository" button formats it. Add the version you used:
+
+```bibtex
+@software{wang_latentclassanalysis_jl,
+  author  = {Wang, Yanwen},
+  title   = {{LatentClassAnalysis.jl}: Latent class analysis in {Julia}},
+  url     = {https://github.com/yanwenwang24/LatentClassAnalysis.jl},
+  version = {0.3.0},
+  year    = {2026}
+}
+```
+
+The package was originally developed for the analysis in [wang2024](@cite), which the
+[childlessness example](@ref "Example: childlessness in Singapore") replicates; cite the
+article when it is relevant to your application:
 
 ```bibtex
 @article{wang2024,

@@ -31,14 +31,15 @@ Preallocated buffers for EM on `d` with `K` classes. The data are stored transpo
 (`yt` is `J × U`) so inner loops walk contiguous memory. With `aggregate=true` and
 `covariates=false` identical response patterns are collapsed into `U` unique rows with
 weights `freq` and a `row_index` mapping every observation to its pattern; with
-`covariates=true` every row is kept, `Xt` holds the transposed raw covariate matrix and
-`Xst` the design the E-step and the coefficient M-step work on: the standardized
-covariates of [`_standardize`](@ref) with their back-transform `A` (`β_raw = A * β_std`),
-or the raw design with `A == I` when `standardize=false` (used by `predict`, whose
-coefficients are already on the raw scale). `eta`/`eta2` (`K × U`) cache linear
-predictors. `n_categories` sizes the per-item buffers (a model may have more categories
-than a held-out data set shows). The second form shares the (immutable) data buffers of
-`ws` and allocates fresh scratch buffers, for use by another thread. Internal.
+`covariates=true` every row is kept and `Xst` holds the `P × U` design the E-step and
+the coefficient M-step work on: the standardized covariates of [`_standardize`](@ref)
+with their back-transform `A` (`β_raw = A * β_std`), or the raw design with `A == I`
+when `standardize=false` (used by `predict`, whose coefficients are already on the raw
+scale). `eta`/`eta2` (`K × U`) cache linear predictors, and `cg`, `cH`, `cM`, `cΔ` and
+`ctrial` are the buffers of the Newton step on the coefficients. `n_categories` sizes
+the per-item buffers (a model may have more categories than a held-out data set shows).
+The second form shares the (immutable) data buffers of `ws` and allocates fresh scratch
+buffers, for use by another thread. Internal.
 """
 struct LCAWorkspace
     K::Int
@@ -49,8 +50,7 @@ struct LCAWorkspace
     yt::Matrix{Int}     # J × U codes, 0 = missing
     freq::Vector{Float64}
     row_index::Vector{Int}
-    Xt::Matrix{Float64} # P × U raw covariates (intercept first); 1 × U when aggregated
-    Xst::Matrix{Float64} # P × U design used by the E-step (standardized, or raw; == Xt without covariates)
+    Xst::Matrix{Float64} # P × U design used by the E-step (standardized, or raw); 1 × U when aggregated
     A::Matrix{Float64}  # P × P back-transform of the coefficients, β_raw = A * β_std
     aggregated::Bool
     covariates::Bool
@@ -63,6 +63,12 @@ struct LCAWorkspace
     w::Vector{Float64}             # K
     eta::Matrix{Float64}           # K × U linear predictors of the current coefficients (K × 0 without covariates)
     eta2::Matrix{Float64}          # K × U trial linear predictors of the Newton step
+    # Newton step on the coefficients, dim = (K - 1)·P (0 without covariates)
+    cg::Vector{Float64}            # gradient
+    cH::Matrix{Float64}            # Hessian
+    cM::Matrix{Float64}            # ridged negative Hessian, factorized in place
+    cΔ::Vector{Float64}            # step
+    ctrial::Matrix{Float64}        # P × K trial coefficients
 end
 
 function LCAWorkspace(d::LCAData, K::Integer; aggregate::Bool=true, covariates::Bool=false,
@@ -98,40 +104,48 @@ function LCAWorkspace(d::LCAData, K::Integer; aggregate::Bool=true, covariates::
         for i in 1:n
             freq[row_index[i]] += 1
         end
-        Xt = ones(1, U)
+        Xraw = ones(1, U)
     else
         U = n
         yt = permutedims(d.y)
         freq = ones(U)
         row_index = collect(1:n)
-        Xt = permutedims(d.X)
+        Xraw = permutedims(d.X)
     end
-    P = size(Xt, 1)
+    P = size(Xraw, 1)
     if covariates && standardize
         Xst, A = _standardize(d.X; names=d.covariate_names)
     else
-        Xst = Xt
+        Xst = Xraw
         A = Matrix{Float64}(I, P, P)
     end
     n_eta = covariates ? U : 0
-    return LCAWorkspace(K, J, U, n, C, yt, freq, row_index, Xt, Xst, A, aggregated, covariates,
+    dim = covariates ? (K - 1) * P : 0
+    return LCAWorkspace(K, J, U, n, C, yt, freq, row_index, Xst, A, aggregated, covariates,
                         Matrix{Float64}(undef, K, U), Vector{Float64}(undef, K),
                         [Matrix{Float64}(undef, K, c) for c in C],
                         Vector{Float64}(undef, K), [zeros(K, c) for c in C],
                         Vector{Float64}(undef, K),
-                        Matrix{Float64}(undef, K, n_eta), Matrix{Float64}(undef, K, n_eta))
+                        Matrix{Float64}(undef, K, n_eta), Matrix{Float64}(undef, K, n_eta),
+                        Vector{Float64}(undef, dim), Matrix{Float64}(undef, dim, dim),
+                        Matrix{Float64}(undef, dim, dim), Vector{Float64}(undef, dim),
+                        Matrix{Float64}(undef, covariates ? P : 0, covariates ? K : 0))
 end
 
 function LCAWorkspace(ws::LCAWorkspace)
     K, U = ws.K, ws.U
     n_eta = size(ws.eta, 2)
-    return LCAWorkspace(K, ws.J, U, ws.n, ws.C, ws.yt, ws.freq, ws.row_index, ws.Xt, ws.Xst,
+    dim = length(ws.cg)
+    return LCAWorkspace(K, ws.J, U, ws.n, ws.C, ws.yt, ws.freq, ws.row_index, ws.Xst,
                         ws.A, ws.aggregated, ws.covariates,
                         Matrix{Float64}(undef, K, U), Vector{Float64}(undef, K),
                         [Matrix{Float64}(undef, K, c) for c in ws.C],
                         Vector{Float64}(undef, K), [zeros(K, c) for c in ws.C],
                         Vector{Float64}(undef, K),
-                        Matrix{Float64}(undef, K, n_eta), Matrix{Float64}(undef, K, n_eta))
+                        Matrix{Float64}(undef, K, n_eta), Matrix{Float64}(undef, K, n_eta),
+                        Vector{Float64}(undef, dim), Matrix{Float64}(undef, dim, dim),
+                        Matrix{Float64}(undef, dim, dim), Vector{Float64}(undef, dim),
+                        similar(ws.ctrial))
 end
 
 """

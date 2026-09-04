@@ -54,12 +54,13 @@ averaged over the sample. Response-pattern aggregation is disabled with covariat
   finite-difference Hessian; two E-step passes per free parameter) and stores it in `vcov`, which
   [`vcov`](@ref), [`stderror`](@ref), [`confint`](@ref), [`coeftable`](@ref) and the
   `se`/`lower`/`upper` columns of [`profiles`](@ref) read. Parameters on the boundary
-  (a probability within `1e-6` of 0 or 1) are held fixed and get `NaN` standard errors
-  with a warning; the standard errors of the remaining cells in a row with a boundary
-  cell are conditional on the boundary cell being fixed. The whole matrix is `NaN` when
-  the observed information is not positive definite or the covariate coefficients
-  diverged. `:none` skips the computation (`vcov` is `nothing`); use it for bootstrap
-  replicates or very large models.
+  (a probability within `1e-6` of 0 or 1), the response parameters of an empty class and
+  parameters with zero observed information are held fixed and get `NaN` standard
+  errors with a warning; the remaining standard errors are conditional on them (for a
+  row with a boundary cell, on that cell being fixed). The whole matrix is `NaN` when
+  the observed information of the remaining parameters is not positive definite or the
+  covariate coefficients diverged. `:none` skips the computation (`vcov` is `nothing`);
+  use it for bootstrap replicates or very large models.
 - `aggregate::Bool=true`: collapse identical response patterns before running EM (exact;
   disabled automatically with covariates)
 - `multithreaded::Bool=false`: run the starts on all Julia threads (results are identical
@@ -101,6 +102,7 @@ function StatsAPI.fit(::Type{LCAModel}, d::LCAData, k::Integer;
                       short_iters=Int(short_iters), max_iter=Int(max_iter), tol=Float64(tol),
                       se=se, aggregate=aggregate && !covariates, verbose=verbose)
     check_identifiability(K, d.n_categories)
+    _check_init_covariates(init, d, covariates)
 
     ws = LCAWorkspace(d, K; aggregate=opts.aggregate, covariates=covariates)
     if K == 1
@@ -131,8 +133,8 @@ function StatsAPI.fit(::Type{LCAModel}, d::LCAData, k::Integer;
     vc, se_msgs = _fit_vcov(θ, ws, opts, diverged)
 
     flags = FitFlags(converged, _count_boundary(θ.item_probs),
-                     findall(<(1e-6), class_probs), replicated, diverged)
-    msgs = vcat(_flag_messages(flags, opts), se_msgs)
+                     findall(<=(BOUNDARY_TOL), class_probs), replicated, diverged)
+    msgs = vcat(_unobserved_messages(d), _flag_messages(flags, opts), se_msgs)
     isempty(msgs) || @warn "$K-class fit: " * join(msgs, "; ")
 
     return LCAModel(K, ws.J, copy(d.n_categories), class_probs, θ.item_probs, beta, d,
@@ -192,13 +194,21 @@ function check_identifiability(n_classes::Integer, n_categories::AbstractVector{
     return true
 end
 
-# Number of item-response probabilities within 1e-6 of 0 or 1.
+# Number of item-response probabilities on the boundary (within BOUNDARY_TOL of 0 or 1).
 function _count_boundary(item_probs::AbstractVector{<:AbstractMatrix{<:Real}})
     n = 0
     for P in item_probs, p in P
-        (p <= 1e-6 || p >= 1 - 1e-6) && (n += 1)
+        _interior(p) || (n += 1)
     end
     return n
+end
+
+# Items without a single observed response: their response probabilities stay uniform
+# and cannot be estimated.
+function _unobserved_messages(d::LCAData)
+    unobserved = [d.item_names[j] for j in 1:size(d.y, 2) if all(iszero, view(d.y, :, j))]
+    isempty(unobserved) && return String[]
+    return ["item(s) $unobserved have no observed responses; their response probabilities are not estimable"]
 end
 
 # Human-readable list of raised flags (empty when the fit is clean).

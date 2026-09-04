@@ -60,7 +60,10 @@ using Tables
         @test diag.entropy == entropy(m)
         @test diag.converged == m.converged
 
-        models = fit(LCAModel, d, 1:3; rng=StableRNG(1), n_starts=4, n_final=2)
+        # (the three-class model has more parameters than the response-pattern table has
+        # cells, which fit warns about)
+        models = @test_logs (:warn, r"may not be identified") match_mode = :any fit(
+            LCAModel, d, 1:3; rng=StableRNG(1), n_starts=4, n_final=2)
         diags = diagnostics(models)
         @test diags isa Vector{ModelDiagnostics}
         @test [x.n_classes for x in diags] == [1, 2, 3]
@@ -112,4 +115,11 @@ using Tables
         @test simulate(m, 10; rng=StableRNG(1)) isa LCAData
         @test_throws ArgumentError bootstrap_lrt(m, m)          # same number of classes
     end
+end
+
+@testset "aicc is undefined for tiny samples" begin
+    y, _ = simulate_lca(StableRNG(71), 8, TWO_CLASS_PROBS, TWO_CLASS_ITEMS)
+    _, m = Test.collect_test_logs(() -> fit(LCAModel, LCAData(y; n_categories=fill(2, 6)), 2;
+                                           rng=StableRNG(1), n_starts=2, n_final=1, se=:none))
+    @test dof(m) == 13 && nobs(m) == 8 && isnan(aicc(m))
 end

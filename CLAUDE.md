@@ -104,8 +104,11 @@ The README quick example must run as pasted; check it with the docs environment
   information matrix and gets a `NaN` standard error; the other cells of its row (or the
   other class sizes) get standard errors conditional on the fixed cell, computed by
   `_softmax_covariance` over the free logits only (the Mplus / Latent GOLD convention).
-  `profiles` gives the fixed cell the degenerate interval `(p, p)`. The bootstrap holds
-  nothing fixed.
+  The item-response logits of an empty class (size `≤ 1e-6`) are held fixed too, and
+  `_covariance` additionally masks any free parameter whose observed information is
+  numerically zero (`_informative`, an item never observed in a class), so a singular
+  block never turns the whole matrix `NaN`. `profiles` gives a fixed cell the degenerate
+  interval `(p, p)`. The bootstrap holds nothing fixed.
 - Bootstrap conventions: replicate fits run under a `NullLogger` with one aggregated
   warning afterwards; a replicate is aligned to the reference model with `_align_labels`
   (`_permute_classes!` re-bases β) and packed with the reference model's `ParamLayout`,

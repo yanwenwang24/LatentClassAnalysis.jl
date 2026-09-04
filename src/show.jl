@@ -112,11 +112,16 @@ function Base.show(io::IO, b::LCABootstrap)
     n_bad = b.n_boot - length(_finite_rows(b.coefs))
     n_bad > 0 && print(io, "\n  replicates with non-finite coefficients (excluded): ", n_bad)
     se = stderror(b)
-    if all(isfinite, se) && !isempty(se)
-        @printf(io, "\n  bootstrap standard errors of the %d parameters: median %.4f, range %.4f to %.4f",
-                length(se), median(se), minimum(se), maximum(se))
+    fin = filter(isfinite, se)
+    if isempty(fin)
+        why = length(_finite_rows(b.coefs)) < 2 ? "fewer than two usable replicates" :
+              "every parameter is on the boundary"
+        print(io, "\n  bootstrap standard errors: undefined (", why, ")")
     else
-        print(io, "\n  bootstrap standard errors: undefined (fewer than two usable replicates)")
+        @printf(io, "\n  bootstrap standard errors of %d parameters: median %.4f, range %.4f to %.4f",
+                length(fin), median(fin), minimum(fin), maximum(fin))
+        n_nan = length(se) - length(fin)
+        n_nan > 0 && print(io, " (NaN for ", _plural(n_nan, "parameter"), " on the boundary)")
     end
     print(io, "\n  see stderror, confint, coeftable and profiles")
     return nothing
@@ -150,10 +155,10 @@ level labels default to those stored in `m.data`.
 
 When the model carries a covariance matrix (fitted with `se=:hessian`, the default),
 every percentage is followed by `±` its delta-method standard error in percentage points
-(see [`profiles`](@ref)); an undefined standard error (a probability on the boundary, or
-the class sizes of a model with covariates) prints as `NaN`. The standard errors of the
-remaining cells in a row with a boundary cell are conditional on the boundary cell being
-fixed.
+(see [`profiles`](@ref)); an undefined standard error (a probability on the boundary, a
+response probability of an empty class, or the class sizes of a model with covariates)
+prints as `NaN`. The standard errors of the remaining cells in a row with a boundary
+cell are conditional on the boundary cell being fixed.
 
 # Arguments
 - `m::LCAModel`: fitted model
@@ -191,7 +196,11 @@ function show_profiles(m::LCAModel;
     fmt = Printf.Format("%.$(digits)f%%")
     sefmt = Printf.Format("%.$(digits)f")
     cell(p, se) = Printf.format(fmt, p * 100) * (withse ? " ±" * Printf.format(sefmt, se * 100) : "")
-    colw = withse ? max(12, 2 * digits + 12) : 12
+    cells = [[cell(m.item_probs[j][k, c], withse ? se_items[j][k, c] : NaN)
+              for k in 1:m.n_classes, c in 1:m.n_categories[j]] for j in 1:m.n_items]
+    # Column width from the widest cell, so that a huge standard error cannot run into
+    # the next column
+    colw = max(12, maximum(length, Iterators.flatten(cells)) + 2)
     println(io)
     println(io, "Latent Class Profiles")
     println(io, "="^80)
@@ -218,8 +227,7 @@ function show_profiles(m::LCAModel;
         for (c, label) in enumerate(labels[j])
             print(io, rpad("$label:", max_label_length + 2))
             for k in 1:m.n_classes
-                se = withse ? se_items[j][k, c] : NaN
-                print(io, rpad(cell(m.item_probs[j][k, c], se), colw))
+                print(io, rpad(cells[j][k, c], colw))
             end
             println(io)
         end

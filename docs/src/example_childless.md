@@ -3,12 +3,21 @@
 This page replicates the latent class analysis in [wang2024](@cite), which
 identifies distinct pathways to permanent childlessness among older adults in
 Singapore from indicators of their partnership, education, and work histories in
-their twenties and thirties. The file `examples/childless_df.arrow` bundled with
-the package is a de-identified extract of the analytic sample (493 respondents,
-15 columns) provided so that the analysis can be reproduced. The same analysis is
-available as a script in `examples/example_childless.jl`.
+their twenties and thirties. The same analysis is available as a script in
+`examples/example_childless.jl`.
 
-<!-- TODO(author): survey name, sampling, permission/license statement -->
+The data come from the Childless Aging in Singapore (CAS) Study, a nationwide survey of
+1,500 Singaporeans aged 50 and above with an oversample of 500 childless respondents,
+conducted from January to June 2022 through in-person interviews with respondents drawn
+at random from a nationally representative list of households provided by the Singapore
+Department of Statistics; the article describes the survey design and its response rate.
+The file `examples/childless_df.arrow` bundled with the package is a de-identified
+extract of the childless respondents aged 50 and above (493 rows, 15 columns: the eight
+pathway indicators, the sampling weights, and a few sociodemographic variables),
+distributed with the package so that the analysis can be reproduced. The article's
+latent class analysis uses 489 respondents (four with missing indicator data were
+excluded) and applies the sampling weights; see
+[Differences from the published analysis](@ref) below.
 
 ## The data
 
@@ -170,21 +179,25 @@ never married, and they are separated by education and occupation; the fifth is 
 only one whose members married.
 
 - **Class 1**, the largest, never married with middle or high education and
-  semi-professional work in both decades.
+  semi-professional work in both decades (the article's *Never-Married
+  Semi-Professionals*).
 - **Class 2** never married with low education and blue-collar work, and had the
-  least access to flexible work and family leave.
-- **Class 3** never married with high education and professional occupations.
+  least access to flexible work and family leave (*Low-Flex Blue-Collars*).
+- **Class 3** never married with high education and professional occupations
+  (*Highly Educated Professionals*).
 - **Class 4** never married with low education and unemployment or blue-collar work in
   the twenties, yet reports flexible work arrangements and family leave almost
-  universally.
+  universally (*Flexible Blue-Collars*).
 - **Class 5**, the smallest, is the only class whose members married, typically late,
   and it carries most of the reported infertility and marital dissolution in the
-  sample.
+  sample (*Ever-Married Semi-Professionals*).
 
 The availability of flexible work and family leave distinguishes class 4 but differs
 little among the other classes. Class numbers follow class size, so identify the
-classes by these profiles rather than by their numbers. Readers can compare these
-profiles with the named pathways in [wang2024](@cite).
+classes by these profiles rather than by their numbers: the names in parentheses are
+those of the same five profiles in [wang2024](@cite), where the weighted estimates rank
+the Ever-Married Semi-Professionals above the Flexible Blue-Collars, so the article's
+fourth and fifth classes are the other way round.
 
 ## Who follows which pathway? Covariates
 

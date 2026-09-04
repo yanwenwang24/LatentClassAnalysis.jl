@@ -29,8 +29,10 @@ block first, then the items:
   (the row has `C_j - 1` parameters, in increasing category order).
 
 `free[i]` is `false` for a parameter whose probability (or whose reference probability)
-lies within `1e-6` of 0 or 1; such parameters are held fixed in the information matrix.
-Coefficients on covariates are always free. `n_total == dof` of the model. Internal.
+lies within `1e-6` of 0 or 1, and for every item-response logit of an empty class
+(`class_probs[k] ≤ 1e-6`, whose response probabilities are not estimable); such
+parameters are held fixed in the information matrix. Coefficients on covariates are
+always free. `n_total == dof` of the model. Internal.
 """
 struct ParamLayout
     K::Int
@@ -82,11 +84,12 @@ function ParamLayout(class_probs::AbstractVector{<:Real},
     for j in 1:J
         B = item_probs[j]
         for k in 1:K
+            empty = class_probs[k] <= BOUNDARY_TOL
             r = ref_cat[j][k]
             i = row_start[j][k]
             for c in 1:C[j]
                 c == r && continue
-                free[i] = _interior(B[k, c]) && _interior(B[k, r])
+                free[i] = !empty && _interior(B[k, c]) && _interior(B[k, r])
                 i += 1
             end
         end
@@ -94,8 +97,26 @@ function ParamLayout(class_probs::AbstractVector{<:Real},
     return ParamLayout(K, J, P, C, covariates, ref_cat, row_start, n_class, n_total, free)
 end
 
+# Numbers of parameters held fixed by the layout: (on the boundary, in an empty class).
+function _fixed_counts(class_probs::AbstractVector{<:Real}, layout::ParamLayout)
+    n_boundary = count(!, view(layout.free, 1:layout.n_class))
+    n_empty = 0
+    for k in 1:layout.K
+        empty = class_probs[k] <= BOUNDARY_TOL
+        for j in 1:layout.J
+            idx = _row_indices(layout, j, k)
+            if empty
+                n_empty += length(idx)
+            else
+                n_boundary += count(!, view(layout.free, idx))
+            end
+        end
+    end
+    return n_boundary, n_empty
+end
+
 function ParamLayout(m::LCAModel)
-    coefs = (hascovariates(m) && m.n_classes > 1) ? hcat(zeros(size(m.beta, 1)), m.beta) : nothing
+    coefs = (hascovariates(m) && m.n_classes > 1) ? _raw_coefs(m) : nothing
     return ParamLayout(m.class_probs, m.item_probs, coefs)
 end
 
@@ -255,10 +276,7 @@ function _score!(g::AbstractVector{Float64}, v::AbstractVector{<:Real}, layout::
     K = layout.K
     if layout.covariates
         dim = layout.n_class
-        if dim > 0
-            H = Matrix{Float64}(undef, dim, dim)
-            _coef_derivatives!(view(g, 1:dim), H, ws, θ.coefs)
-        end
+        dim > 0 && _coef_gradient!(view(g, 1:dim), ws, θ.coefs)
     else
         nbar = sum(ws.freq)
         @inbounds for k in 2:K
@@ -320,26 +338,53 @@ function _observed_information(v::AbstractVector{<:Real}, layout::ParamLayout, w
     return info
 end
 
-# Covariance of the free parameters at v (n_total × n_total on the internal scale; NaN
-# rows and columns for parameters on the boundary). Returns (V, posdef); when the observed
-# information is not positive definite V is all NaN.
+# Covariance of the free parameters at v (n_total × n_total, internal scale; NaN rows and
+# columns for fixed parameters). Free parameters with numerically zero information
+# (`_informative`, e.g. an item never observed in a class) are cleared from `layout.free`
+# and masked too, so that the others keep finite standard errors. Returns
+# (V, posdef, n_uninformative); V is all NaN when the information is not positive definite.
 function _covariance(v::AbstractVector{<:Real}, layout::ParamLayout, ws::LCAWorkspace)
     n = layout.n_total
     V = fill(NaN, n, n)
     info = _observed_information(v, layout, ws)
+    free = findall(layout.free)
+    keep = _informative(info)
+    n_uninformative = count(!, keep)
+    if n_uninformative > 0
+        for (a, p) in enumerate(free)
+            keep[a] || (layout.free[p] = false)
+        end
+        info = info[keep, keep]
+        free = free[keep]
+    end
     posdef = all(isfinite, info)
     if posdef
         F = cholesky(Symmetric(info); check=false)
         posdef = issuccess(F)
         if posdef
             Vf = inv(F)
-            free = findall(layout.free)
             @inbounds for (b, q) in enumerate(free), (a, p) in enumerate(free)
                 V[p, q] = (Vf[a, b] + Vf[b, a]) / 2
             end
         end
     end
-    return V, posdef
+    return V, posdef, n_uninformative
+end
+
+# Diagonal entries of the observed information below this fraction of the largest one
+# (and of 1) count as zero.
+const INFO_ZERO_TOL = 1e-12
+
+# `false` for parameters whose diagonal information is numerically zero. NaN or infinite
+# entries count as informative so that they surface as a non-positive-definite matrix.
+function _informative(info::AbstractMatrix{<:Real})
+    nf = size(info, 1)
+    scale = 1.0
+    @inbounds for a in 1:nf
+        d = info[a, a]
+        isfinite(d) && (scale = max(scale, abs(d)))
+    end
+    return BitVector(!(isfinite(info[a, a]) && abs(info[a, a]) <= INFO_ZERO_TOL * scale) for a in 1:nf)
 end
 
 # Linear map from the internal parameter vector to the public coef scale: block diagonal
@@ -390,17 +435,22 @@ function _fit_vcov(θ::LCAParams, ws::LCAWorkspace, opts::LCAOptions, diverged::
         return fill(NaN, n, n), msgs
     end
     v = _pack(θ, layout)
-    V, posdef = _covariance(v, layout, ws)
+    nfix, n_empty = _fixed_counts(θ.class_probs, layout)
+    V, posdef, n_zero = _covariance(v, layout, ws)
     posdef || push!(msgs, "observed information is not positive definite (weakly identified " *
                           "or non-converged model); standard errors are NaN")
-    nfix = n - count(layout.free)
+    conditional = "the remaining standard errors are conditional on them being held fixed"
     if nfix > 0
         push!(msgs, nfix == 1 ?
               "1 parameter is on the boundary (0 or 1); its standard error is undefined and reported as NaN, " *
               "and the remaining standard errors are conditional on it being held fixed" :
               "$nfix parameters are on the boundary (0 or 1); their standard errors are undefined and reported as NaN, " *
-              "and the remaining standard errors are conditional on them being held fixed")
+              "and $conditional")
     end
+    n_empty > 0 && push!(msgs, "the $n_empty response parameters of the empty class(es) are not estimable " *
+                               "and have NaN standard errors; $conditional")
+    n_zero > 0 && push!(msgs, "$n_zero parameter(s) have zero observed information (a class never observed " *
+                              "with an item) and NaN standard errors; $conditional")
     return _to_public_vcov(V, layout, ws.A), msgs
 end
 
@@ -410,7 +460,7 @@ function _model_params(m::LCAModel)
     K = m.n_classes
     withcov = hascovariates(m) && K > 1
     ws = LCAWorkspace(m.data, K; aggregate=!withcov, covariates=withcov)
-    coefs = withcov ? ws.A \ hcat(zeros(size(m.beta, 1)), m.beta) : nothing
+    coefs = withcov ? ws.A \ _raw_coefs(m) : nothing
     θ = LCAParams(copy(m.class_probs), [copy(B) for B in m.item_probs], coefs)
     return ws, θ, ParamLayout(θ.class_probs, θ.item_probs, θ.coefs)
 end
@@ -485,11 +535,13 @@ end
 
 Covariance matrix of [`coef`](@ref) (`dof × dof`), the inverse of the observed information
 matrix computed by [`fit`](@ref) with `se=:hessian` (the default). Rows and columns of
-parameters on the boundary (a probability within `1e-6` of 0 or 1) are `NaN`; those
-parameters are held fixed in the information matrix, so the remaining entries are
-conditional on them. The whole matrix is `NaN` when the observed information is not
-positive definite or the covariate coefficients diverged. Throws an `ErrorException` for
-a model fitted with `se=:none`.
+parameters that are not estimable are `NaN`: parameters on the boundary (a probability
+within `1e-6` of 0 or 1), the response parameters of an empty class (size `≤ 1e-6`), and
+parameters with zero observed information. Those parameters are held fixed in the
+information matrix, so the remaining entries are conditional on them. The whole matrix
+is `NaN` when the observed information of the remaining parameters is not positive
+definite or the covariate coefficients diverged. Throws an `ErrorException` for a model
+fitted with `se=:none`.
 """
 function StatsAPI.vcov(m::LCAModel)
     m.vcov === nothing && throw(ErrorException(
@@ -527,7 +579,7 @@ end
 
 # "95" for level 0.95, "99.9" for 0.999: the confidence level as a percentage string.
 function _level_string(level::Real)
-    pct = 100 * level
+    pct = round(100 * level; digits=10)     # 0.57 * 100 is 56.99999999999999
     return isinteger(pct) ? string(Int(pct)) : string(pct)
 end
 
@@ -546,11 +598,18 @@ coeftable(m; which=:class)      # covariate effects on class membership
 ```
 """
 function StatsAPI.coeftable(m::LCAModel; level::Real=0.95, which::Symbol=:all)
-    which in (:all, :class, :items) ||
-        throw(ArgumentError("which must be :all, :class or :items, got $(repr(which))"))
+    _check_which(which)
+    return _coeftable(m, stderror(m), confint(m; level=level), level, which)
+end
+
+_check_which(which::Symbol) = which in (:all, :class, :items) ||
+    throw(ArgumentError("which must be :all, :class or :items, got $(repr(which))"))
+
+# Coefficient table of the free parameters of `m` from standard errors and `level`
+# confidence intervals of either source (observed information or bootstrap), restricted
+# to the rows selected by `which`.
+function _coeftable(m::LCAModel, se::AbstractVector, ci::AbstractMatrix, level::Real, which::Symbol)
     c = coef(m)
-    se = stderror(m)
-    ci = confint(m; level=level)
     names = coefnames(m)
     n_class = (m.n_classes - 1) * size(m.beta, 1)
     idx = which === :all ? (1:length(c)) : which === :class ? (1:n_class) : (n_class + 1:length(c))
@@ -569,8 +628,9 @@ end
 Observed information matrix of the free parameters on the [`coef`](@ref) scale
 (`dof × dof`): the negative Hessian of the log-likelihood, recomputed from the analytic
 score by central finite differences (see [`vcov`](@ref) for its inverse). Rows and columns
-of parameters on the boundary are `NaN`. Only the observed information is available;
-`expected=true` throws an `ArgumentError`.
+of parameters on the boundary are `NaN`. Only the observed information is available, so
+the default is `expected=false` (StatsAPI's generic default is `true`); `expected=true`
+throws an `ArgumentError`.
 """
 function StatsAPI.informationmatrix(m::LCAModel; expected::Bool=false)
     expected && throw(ArgumentError("only the observed information is available"))
@@ -590,16 +650,12 @@ end
 # Delta method: class sizes and item-response probabilities
 # ---------------------------------------------------------------------------------------
 
-# Delta-method covariance of the probabilities `p = softmax(γ)` of one block (a row of
-# item_probs, or the class sizes), given the logits' parameter indices `idx` (in category
-# order, the reference category `r` omitted) and the covariance matrix `V` of all
-# parameters. Only the free logits (`free[idx]`) enter: a logit held fixed on the boundary
-# has zero variance and zero covariance, so its Jacobian column drops out and the result is
-# the covariance of the remaining cells *conditional* on the boundary cell being fixed, as
-# Mplus and Latent GOLD report it. With `∂p_c/∂γ_d = p_c(δ_cd - p_d)` for the free `d`,
-# `S = J V_free J'`; the rows and columns of the boundary cells themselves are NaN. All NaN
-# when no logit is free (the reference cell is at 1 and every other cell at 0, or a class
-# block whose reference class has size 1) or when the free block of `V` is not finite.
+# Delta-method covariance of one softmax block `p` (a row of item_probs or the class
+# sizes) from the covariance `V` of its logits at indices `idx` (category order, reference
+# `r` omitted). Only the free logits enter, so the result is conditional on the boundary
+# cells being fixed (the Mplus / Latent GOLD convention): `S = J V_free J'` with
+# `∂p_c/∂γ_d = p_c(δ_cd - p_d)`, NaN rows and columns for the boundary cells, and all NaN
+# when no logit is free or the free block of `V` is not finite.
 function _softmax_covariance(p::AbstractVector{<:Real}, r::Integer, idx::AbstractUnitRange,
                              free::AbstractVector{Bool}, V::AbstractMatrix)
     C = length(p)
@@ -632,11 +688,9 @@ function _softmax_covariance(p::AbstractVector{<:Real}, r::Integer, idx::Abstrac
     return S
 end
 
-# Delta-method covariance of the class sizes (K × K). NaN without a covariance matrix and
-# for covariate models (whose class sizes are sample averages of the covariate-specific
-# membership probabilities); zero for a single class. A class whose size is on the boundary
-# (empty) gets NaN and the other classes conditional standard errors (see
-# `_softmax_covariance`).
+# Delta-method covariance of the class sizes (K × K): NaN without a covariance matrix or
+# with covariates (the sizes are then sample averages), zero for a single class; an empty
+# class gets NaN and the others conditional standard errors.
 function _class_covariance(class_probs::AbstractVector{<:Real}, layout::ParamLayout,
                            V::Union{Nothing,AbstractMatrix})
     K = layout.K
@@ -648,10 +702,8 @@ end
 _class_covariance(m::LCAModel, layout::ParamLayout, V::Union{Nothing,AbstractMatrix}) =
     _class_covariance(m.class_probs, layout, V)
 
-# Delta-method covariance of row k of item_probs[j] (C_j × C_j): with the row's logits γ_d
-# (d ≠ ref) and B = softmax, ∂B_c/∂γ_d = B_c(δ_cd - B_d). NaN without a covariance matrix;
-# a cell on the boundary gets NaN and the other cells of its row standard errors conditional
-# on it being fixed (see `_softmax_covariance`).
+# Delta-method covariance of row k of item_probs[j] (C_j × C_j); NaN without a covariance
+# matrix, and see `_softmax_covariance` for boundary cells.
 function _profile_covariance(m::LCAModel, layout::ParamLayout, V::Union{Nothing,AbstractMatrix},
                              j::Integer, k::Integer)
     V === nothing && return fill(NaN, layout.C[j], layout.C[j])
@@ -698,8 +750,8 @@ has no standard error: its logit is held fixed, `se` is `NaN` and `lower = upper
 The standard errors of the remaining cells in a row with a boundary cell are conditional
 on the boundary cell being fixed (only the free logits of the row enter the delta
 method, as in Mplus and Latent GOLD). When a row has no free logit (its modal
-probability is 1) `se`, `lower` and `upper` are `NaN` for the whole row, as they are for
-every row of a model fitted with `se=:none`.
+probability is 1, or the row belongs to an empty class) `se`, `lower` and `upper` are
+`NaN` for the whole row, as they are for every row of a model fitted with `se=:none`.
 
 With `classes=true` the table starts with one row per class holding its size:
 `item = :class`, `level = "k"`, `class = k`, `prob = class_probs[k]`, with the
@@ -744,10 +796,9 @@ function profiles(m::LCAModel; level::Real=0.95, classes::Bool=false)
     return rows
 end
 
-# Confidence interval of one probability of a softmax block: the logit-scale interval when
-# its standard error is defined; the degenerate interval (p, p) for a cell held fixed on
-# the boundary while the other cells of its block have (conditional) standard errors; NaN
-# otherwise (no covariance matrix, or a block with no free logit).
+# Confidence interval of one probability: on the logit scale when its standard error is
+# defined, (p, p) for a boundary cell whose block has conditional standard errors, NaN
+# otherwise.
 function _profile_ci(p::Real, se::Real, z::Real, conditional::Bool)
     isnan(se) && conditional && !_interior(p) && return (Float64(p), Float64(p))
     return _logit_ci(p, se, z)

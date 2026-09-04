@@ -18,7 +18,7 @@ sets of parameters:
 
 - the *class membership probabilities* ``\pi_k = P(\text{class } k)``, with
   ``\sum_{k=1}^K \pi_k = 1``, and
-- the *item response probabilities* ``\rho_{jkc} = P(y_{ij} = c \mid \text{class } k)``,
+- the *item-response probabilities* ``\rho_{jkc} = P(y_{ij} = c \mid \text{class } k)``,
   with ``\sum_{c=1}^{C_j} \rho_{jkc} = 1`` for every item ``j`` and class ``k``.
 
 In the package, `model.class_probs[k]` is ``\pi_k`` and `model.item_probs[j][k, c]`
@@ -86,7 +86,7 @@ weighted proportions
 ```
 
 Each class size becomes the average posterior probability of that class, and each
-item response probability becomes the proportion of respondents who gave that
+item-response probability becomes the proportion of respondents who gave that
 answer, with every respondent counted in proportion to how likely they are to be in
 the class. Response probabilities are floored at ``10^{-10}`` so that no logarithm
 is ever taken of zero; estimates that end up within ``10^{-6}`` of 0 or 1 are counted
@@ -437,8 +437,10 @@ as `NaN`, and the standard errors of the remaining probabilities in that row are
 method runs over the free logits of the row only, so the reported uncertainty is that
 of the split among the observed categories. This is the convention of Mplus and Latent
 GOLD. For a binary item a boundary cell fixes the whole row and every entry of the row
-is `NaN`; an empty class is treated in the same way in the class-size block. A row with
-a boundary cell also has a degenerate interval ``[\hat\rho, \hat\rho]`` for that cell in
+is `NaN`; an empty class is treated in the same way in the class-size block, and its
+item-response probabilities, which no observation informs, are held fixed as well so
+that the standard errors of the other classes remain defined. A row with a boundary
+cell also has a degenerate interval ``[\hat\rho, \hat\rho]`` for that cell in
 [`profiles`](@ref).
 
 ### [Bootstrap standard errors](@id bootstrap-se)

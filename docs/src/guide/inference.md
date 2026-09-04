@@ -47,7 +47,8 @@ available for 14 of the 15 parameters.
 The free parameters of the model live on the *logit* scale, which is where the asymptotic
 normal approximation behind the standard errors works best. [`coef`](@ref) returns them,
 [`coefnames`](@ref) labels them, and [`coeftable`](@ref) tabulates them with standard
-errors, Wald ``z`` statistics and p-values against zero, and confidence intervals:
+errors, Wald ``z`` statistics (the estimate divided by its standard error) and p-values
+against zero, and confidence intervals:
 
 ```@example inference
 coeftable(m)
@@ -77,7 +78,8 @@ rarely a hypothesis of interest.
 
 Most readers want the response probabilities, not their logits. [`show_profiles`](@ref)
 prints them as percentages followed by `±` their standard error in percentage points,
-computed from the logit-scale covariance matrix by the delta method:
+computed from the logit-scale covariance matrix by the delta method (which converts the
+standard errors of the logits into standard errors of the probabilities):
 
 ```@example inference
 show_profiles(m)
@@ -105,7 +107,9 @@ and Latent GOLD, and it is the right reading of those standard errors: they desc
 uncertainty of the split between the observed levels, not of whether the boundary cell
 is really zero. For a binary item a boundary cell fixes the whole row, and every entry of
 that row is `NaN`. The same rules apply to the class sizes: an empty class has no standard
-error and the other class sizes are conditional on it.
+error and the other class sizes are conditional on it. The response probabilities of an
+empty class are `NaN` as well, since no observation informs them; the fit warning says so,
+and the standard errors of the other classes are unaffected.
 
 The class sizes of a model *with covariates* are sample averages of the covariate-specific
 membership probabilities, and their standard errors are `NaN` for a different reason: the
@@ -155,8 +159,9 @@ DataFrame(parameter = coefnames(m), hessian = round.(stderror(m); digits = 3),
           bootstrap = round.(stderror(b); digits = 3))
 ```
 
-The boundary parameter is the exception: its logit is about ``-22`` (the log of the floor
-at which the package holds probabilities) and stays there in every replicate, so a
+The boundary parameter is the exception: its logit is about ``-22`` (the log of the
+``10^{-10}`` floor at which the package holds probabilities, relative to the reference
+level) and stays there in every replicate, so a
 bootstrap standard error for it would be a meaningless near-zero number, and in other data
 sets a cell that leaves the boundary in some replicates would produce a huge one instead.
 [`stderror`](@ref stderror(::LCABootstrap)), [`vcov`](@ref vcov(::LCABootstrap)),
