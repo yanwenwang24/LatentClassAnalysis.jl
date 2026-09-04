@@ -167,8 +167,8 @@ profiles with the named pathways in [wang2024](@cite).
 d = prepare_data(df, indicators; levels = levels)
 ```
 
-- **No covariates or standard errors.** Any analysis in the article that relates
-  class membership to other characteristics, or that reports uncertainty around the
-  estimates, is not reproduced here; both are coming in the 0.3.0 release, see
-  [What is coming in the 0.3.0 release](@ref roadmap). The columns `female`, `age`,
-  `race`, `nativity` and `sibs` are in the data set for that purpose.
+- **No covariates.** Any analysis in the article that relates class membership to
+  other characteristics is not reproduced here. The columns `female`, `age`, `race`,
+  `nativity` and `sibs` are in the data set for that purpose (`prepare_data(df,
+  indicators; covariates = [...])`). Standard errors of the profiles are available
+  from `profiles(best)`; the article's are not compared here because of the weights.

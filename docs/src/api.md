@@ -6,8 +6,8 @@ section heading is exported by `LatentClassAnalysis`, except where noted. The
 [Internals](@ref) section documents unexported helpers that are useful to know about
 but may change between minor versions.
 
-Covariates, standard errors, and the bootstrap are coming in the 0.3.0 release: their
-functions are exported and documented but throw an error in this build.
+The bootstrap is coming in the 0.3.0 release: its functions are exported and documented
+but throw an error in this build.
 
 ## Data
 
@@ -35,9 +35,6 @@ LCAModel
 
 ## Fit statistics
 
-`aic`, `bic` and `aicc` are the StatsAPI defaults computed from
-[`loglikelihood`](@ref), [`dof`](@ref) and [`nobs`](@ref).
-
 ```@docs
 nobs
 dof
@@ -45,6 +42,7 @@ loglikelihood
 isfitted
 aic
 bic
+aicc
 sbic
 entropy
 diagnostics
@@ -67,13 +65,19 @@ show_profiles
 
 ## Standard errors
 
-Coming in the 0.3.0 release: `coef`, `coefnames`, `stderror`, `confint`, `coeftable`
-and `informationmatrix` are exported for that purpose but have no methods yet;
-`vcov` throws until a covariance matrix is computed.
+The free parameters live on the logit scale (see [`coef`](@ref) for the layout); their
+covariance matrix is the inverse of the observed information, computed by `fit` unless
+`se = :none`. [`profiles`](@ref) carries the delta-method standard errors of the
+response probabilities.
 
 ```@docs
 coef
+coefnames
 vcov
+stderror
+confint
+coeftable
+informationmatrix
 ```
 
 ## Simulation and bootstrap

@@ -45,6 +45,12 @@ using LatentClassAnalysis
         @test occursin("Tables.jl", docstr(ModelDiagnostics))
         @test occursin("relative", docstr(entropy))
         @test occursin("level", docstr(profiles))
+        @test occursin("classes", docstr(profiles))
+        for f in (coef, coefnames, vcov, stderror, confint, coeftable, informationmatrix, aic, bic, aicc)
+            @test occursin("LCAModel", docstr(f))
+        end
+        @test occursin("which", docstr(coeftable))
+        @test occursin("expected", docstr(informationmatrix))
         for kw in ("var_names", "var_labels", "digits", "io")
             @test occursin(kw, docstr(show_profiles))
         end
@@ -65,7 +71,8 @@ using LatentClassAnalysis
                     LCA._accumulate!, LCA._update!, LCA._em!, LCA._multistart, LCA._init_random,
                     LCA._init_split, LCA.check_identifiability, LCA._standardize,
                     LCA._coef_objective, LCA._coef_derivatives!, LCA._update_coefs!,
-                    LCA._class_prior)
+                    LCA._class_prior, LCA.ParamLayout, LCA._pack, LCA._unpack!, LCA._score!,
+                    LCA._observed_information)
             @test hasdoc(obj)
         end
     end

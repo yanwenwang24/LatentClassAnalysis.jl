@@ -23,13 +23,18 @@ function Base.show(io::IO, d::LCAData)
     return nothing
 end
 
+# "1 class", "2 classes"
+_plural(n::Integer, word::AbstractString, plural::AbstractString=word * "s") =
+    string(n, " ", n == 1 ? word : plural)
+
 function Base.show(io::IO, m::LCAModel)
     K, J, n = m.n_classes, m.n_items, nobs(m)
     if get(io, :compact, false)
-        print(io, "LCAModel(", K, " classes, ", J, " items, n = ", n, ")")
+        print(io, "LCAModel(", _plural(K, "class", "classes"), ", ", _plural(J, "item"), ", n = ", n, ")")
         return nothing
     end
-    print(io, "LCAModel with ", K, " classes, ", J, " items and ", n, " observations")
+    print(io, "LCAModel with ", _plural(K, "class", "classes"), ", ", _plural(J, "item"),
+          " and ", _plural(n, "observation"))
     @printf(io, "\n  log-likelihood: %.4f   dof: %d   BIC: %.4f", m.loglik, dof(m), bic(m))
     if K == 1
         print(io, "\n  single class: closed-form solution")
@@ -45,6 +50,13 @@ function Base.show(io::IO, m::LCAModel)
         K > 1 && _show_coefficients(io, m)
     end
     hasmissing(m) && print(io, "\n  missing responses: ", sum(nmissing(m)))
+    if m.vcov === nothing
+        print(io, "\n  standard errors: none (se = :none)")
+    else
+        n_nan = count(i -> isnan(m.vcov[i, i]), 1:size(m.vcov, 1))
+        print(io, "\n  standard errors: observed information",
+              n_nan == 0 ? "" : " (NaN for $n_nan of $(dof(m)) parameters)")
+    end
     msgs = _flag_messages(m.flags, m.options)
     print(io, "\n  fit flags: ", isempty(msgs) ? "none" : join(msgs, "; "))
     return nothing
@@ -93,12 +105,17 @@ Print the latent class profiles: the size of every class and, for every item, th
 probability of each response level within each class (as percentages). Item names and
 level labels default to those stored in `m.data`.
 
+When the model carries a covariance matrix (fitted with `se=:hessian`, the default),
+every percentage is followed by `±` its delta-method standard error in percentage points
+(see [`profiles`](@ref)); an undefined standard error (a probability on the boundary, or
+the class sizes of a model with covariates) prints as `NaN`.
+
 # Arguments
 - `m::LCAModel`: fitted model
 - `var_names`: display names of the items (default: the item names of the data)
 - `var_labels`: display labels of the levels of every item, one vector per item (default:
   the level labels of the data)
-- `digits::Integer=3`: decimal places of the printed percentages
+- `digits::Integer=3`: decimal places of the printed percentages and standard errors
 - `io::IO=stdout`: output stream
 
 # Returns
@@ -124,13 +141,20 @@ function show_profiles(m::LCAModel;
     end
     digits >= 0 || throw(ArgumentError("digits must be non-negative, got $digits"))
 
+    withse = m.vcov !== nothing
+    se_class, se_items = withse ? _profile_se(m) : (Float64[], Matrix{Float64}[])
     fmt = Printf.Format("%.$(digits)f%%")
+    sefmt = Printf.Format("%.$(digits)f")
+    cell(p, se) = Printf.format(fmt, p * 100) * (withse ? " ±" * Printf.format(sefmt, se * 100) : "")
+    colw = withse ? max(12, 2 * digits + 12) : 12
     println(io)
     println(io, "Latent Class Profiles")
     println(io, "="^80)
     println(io, "Class Sizes:")
     for k in 1:m.n_classes
-        println(io, "  Class $k: $(rpad(@sprintf("%.1f", m.class_probs[k] * 100), 6))%")
+        print(io, "  Class $k: $(rpad(@sprintf("%.1f", m.class_probs[k] * 100), 6))%")
+        withse && @printf(io, " ±%.1f", se_class[k] * 100)
+        println(io)
     end
     println(io, "-"^80)
 
@@ -139,13 +163,14 @@ function show_profiles(m::LCAModel;
         println(io, "\n$var:")
         print(io, " "^(max_label_length + 2))
         for k in 1:m.n_classes
-            print(io, "Class $k", " "^7)
+            print(io, rpad("Class $k", colw))
         end
         println(io)
         for (c, label) in enumerate(labels[j])
             print(io, rpad("$label:", max_label_length + 2))
             for k in 1:m.n_classes
-                print(io, rpad(Printf.format(fmt, m.item_probs[j][k, c] * 100), 12))
+                se = withse ? se_items[j][k, c] : NaN
+                print(io, rpad(cell(m.item_probs[j][k, c], se), colw))
             end
             println(io)
         end

@@ -8,11 +8,20 @@ All notable changes to this project are documented in this file. The format foll
 
 ### 0.3.0 (breaking; in development on branch `v0.3.0`)
 
-Still to come in 0.3.0: standard errors and confidence intervals (`coef`, `vcov`,
-`stderror`, `confint`, `coeftable`, the `se`/`lower`/`upper` columns of `profiles`), and
-`simulate`, `bootstrap`, `bootstrap_lrt`.
+Still to come in 0.3.0: `simulate`, `bootstrap`, `bootstrap_lrt`.
 
 #### Added
+- Standard errors and confidence intervals: `fit` computes the covariance matrix of the
+  free parameters from the observed information matrix (analytic score, finite-difference
+  Hessian) unless `se=:none`. `coef`/`coefnames` give the parameters on the logit scale
+  (class-membership block first, then the item logits against each row's modal
+  category), `vcov`, `stderror`, `confint(m; level)`, `coeftable(m; level, which)` and
+  `informationmatrix` read them; `profiles` fills its `se`/`lower`/`upper` columns by the
+  delta method (logit-scale intervals) and `profiles(m; classes=true)` prepends the class
+  sizes; `show_profiles` prints `±se`. Parameters on the boundary (a probability within
+  1e-6 of 0 or 1) get `NaN` standard errors with a warning, as does the whole matrix when
+  the observed information is not positive definite or the coefficients diverged.
+- `aic`, `bic` and `aicc` have explicit, documented methods for `LCAModel`.
 - Covariates on class membership (latent class regression): `prepare_data(table, items;
   covariates=[:age, :female])` or `LCAData(y; covariates=X)` and `fit(LCAModel, d, k)`
   fit the multinomial-logit membership model `log(π_k(x)/π_1(x)) = x'β_k` by EM with one

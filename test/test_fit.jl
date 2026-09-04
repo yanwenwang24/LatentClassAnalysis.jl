@@ -22,7 +22,7 @@ const LCA = LatentClassAnalysis
         @test isfinite(m.loglik) && m.loglik < 0
         @test m.flags.converged && m.flags.best_ll_replicated
         @test m.flags.n_boundary == 0 && isempty(m.flags.empty_classes)
-        @test m.vcov === nothing
+        @test m.vcov isa Matrix{Float64} && size(m.vcov) == (dof(m), dof(m))
         @test m.data === d
 
         perm = align_classes(m.item_probs, TWO_CLASS_ITEMS)

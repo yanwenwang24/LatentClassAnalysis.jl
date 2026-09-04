@@ -132,15 +132,28 @@ show_profiles(best)
   classes of nearly equal size can swap numbers between data sets or seeds. Name the
   classes by their profiles, not by their numbers.
 
-The same numbers are available as a table from [`profiles`](@ref), with one row per
-item, response level and class. The `se`, `lower` and `upper` columns hold the
-standard error and confidence bounds of each probability; they are `NaN` in this
-version and will be filled in by the standard-error support that is coming in the
-0.3.0 release.
+Each percentage is followed by `±` its standard error (in percentage points), and
+the class sizes by theirs. The same numbers are available as a table from
+[`profiles`](@ref), with one row per item, response level and class: `se` is the
+delta-method standard error of the probability and `lower`/`upper` are the bounds of a
+95% confidence interval computed on the logit scale, so they stay within `[0, 1]`
+(`level = 0.9` changes the level, `classes = true` prepends the class sizes).
 
 ```@example tutorial
-prof = DataFrame(profiles(best))
+prof = DataFrame(profiles(best; classes = true))
 first(prof, 6)
+```
+
+The standard errors come from the observed information matrix, which `fit` computes
+by default (`se = :none` skips it). The free parameters on the logit scale, their
+standard errors, Wald tests and confidence intervals are tabulated by
+[`coeftable`](@ref); `which = :class` restricts it to the class-membership block
+(here the log-odds of each class against class 1) and `which = :items` to the
+response logits. A probability estimated at exactly 0 or 1 has no standard error
+(`NaN`), which `fit` reports in its warning.
+
+```@example tutorial
+coeftable(best; which = :class)
 ```
 
 Because it is a table, it can be reshaped with the usual tools; for instance, item 6
@@ -273,5 +286,8 @@ solution. Use a `StableRNG` for results that are stable across Julia versions;
 - **Sample size.** Small samples produce unstable profiles, especially with many
   classes or rare response categories; the fit flags and the replication of the best
   log-likelihood across starts are the symptoms to watch.
-- **Covariates, standard errors and the bootstrap likelihood-ratio test** are coming
-  in the 0.3.0 release; see [What is coming in the 0.3.0 release](@ref roadmap).
+- **Standard errors** are asymptotic (observed information) and describe uncertainty
+  given the number of classes; they say nothing about whether that number is right.
+  Standard errors of boundary estimates are undefined and reported as `NaN`.
+- **The bootstrap likelihood-ratio test** is coming in the 0.3.0 release; see
+  [What is coming in the 0.3.0 release](@ref roadmap).

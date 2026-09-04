@@ -266,11 +266,40 @@ boundary probabilities, or an empty class. When you see them, or when different
 seeds lead to noticeably different profiles at the same log-likelihood, treat the
 class solution with caution, prefer fewer classes, or add indicators.
 
+## Standard errors and confidence intervals
+
+The free parameters of the model are the multinomial-logit coefficients of the class
+membership model (without covariates, the log-odds ``\log(\pi_k/\pi_1)``) and, for
+every item and class, the log-odds of each response category against the class's
+modal category, ``\gamma_{jkc} = \log(\rho_{jkc} / \rho_{jkr})``. [`coef`](@ref)
+returns them in that order and [`coefnames`](@ref) labels them. Their covariance
+matrix is the inverse of the observed information matrix, the negative Hessian of the
+log-likelihood at the maximum-likelihood estimate: the score (gradient) is computed
+analytically from the posterior probabilities of the final E-step, and the Hessian by
+central finite differences of the score. [`vcov`](@ref), [`stderror`](@ref),
+[`confint`](@ref) and [`coeftable`](@ref) read it; `fit(...; se = :none)` skips the
+computation.
+
+Standard errors of the response probabilities and of the class sizes follow by the
+delta method: with ``\rho = \mathrm{softmax}(\gamma)`` within an item row,
+``\partial \rho_c / \partial \gamma_d = \rho_c(\delta_{cd} - \rho_d)``, so
+``\mathrm{Var}(\rho) = J\,\mathrm{Var}(\gamma)\,J'``. [`profiles`](@ref) reports these
+standard errors and confidence intervals computed on the logit scale (hence within
+``[0, 1]`` and asymmetric around the estimate). Two limitations are inherent to the
+approach. A probability estimated at exactly 0 or 1 lies on the boundary of the
+parameter space, where the Wald approximation does not hold: the corresponding
+parameters are held fixed and their standard errors are reported as `NaN`. And with
+covariates the class sizes are sample averages of the covariate-specific membership
+probabilities, for which no standard error is reported. These standard errors are
+asymptotic and condition on the number of classes; comparing class counts is the job
+of the information criteria and the bootstrap likelihood-ratio test below.
+
 ## [What is coming in the 0.3.0 release](@id roadmap)
 
-This build of 0.3.0 contains the redesigned data and fitting layer described above.
-The following features are part of the 0.3.0 release and are being finished; their
-functions already exist in the package but throw an error until then.
+This build of 0.3.0 contains the redesigned data and fitting layer, covariates and
+standard errors described above. The following features are part of the 0.3.0 release
+and are being finished; their functions already exist in the package but throw an
+error until then.
 
 - **Covariates.** Class membership can be related to respondent characteristics by
   the concomitant-variable model of [dayton1988](@cite), in which the class sizes
@@ -282,11 +311,6 @@ functions already exist in the package but throw an error until then.
   covariates after the fact with that caveat in mind. (`prepare_data(...;
   covariates = [...])` already stores the covariates; `fit(...; covariates = true)`
   is the entry point.)
-- **Standard errors and confidence intervals.** The observed information matrix
-  from the analytic score and a finite-difference Hessian, with the delta method for
-  the response probabilities; `coef`, `vcov`, `stderror`, `confint`, `coeftable`, and
-  the `se`/`lower`/`upper` columns of [`profiles`](@ref). Standard errors of boundary
-  estimates are undefined and will be reported as `NaN`.
 - **Bootstrap likelihood-ratio test.** The parametric bootstrap test of
   [mclachlan1987](@cite) for ``K`` against ``K + 1`` classes, the procedure
   recommended by [nylund2007](@cite): `bootstrap_lrt(model_K, model_K1)`. It is built on

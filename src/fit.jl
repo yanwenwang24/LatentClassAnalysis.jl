@@ -49,8 +49,15 @@ averaged over the sample. Response-pattern aggregation is disabled with covariat
 - `short_iters::Integer=50`: EM iterations of every short run
 - `max_iter::Integer=10_000`: maximum EM iterations of every final run
 - `tol::Real=1e-10`: relative convergence tolerance, `|ll - ll_old| ≤ tol·(1 + |ll|)`
-- `se::Symbol=:hessian`: standard errors, `:hessian` or `:none`; stored in `options`. No
-  covariance matrix is computed in this version (`vcov` is `nothing`).
+- `se::Symbol=:hessian`: standard errors. `:hessian` computes the covariance matrix of
+  the free parameters from the observed information matrix (analytic score, central
+  finite-difference Hessian; `2·dof` E-step passes) and stores it in `vcov`, which
+  [`vcov`](@ref), [`stderror`](@ref), [`confint`](@ref), [`coeftable`](@ref) and the
+  `se`/`lower`/`upper` columns of [`profiles`](@ref) read. Parameters on the boundary
+  (a probability within `1e-6` of 0 or 1) get `NaN` standard errors with a warning, as
+  does the whole matrix when the observed information is not positive definite or the
+  covariate coefficients diverged. `:none` skips the computation (`vcov` is `nothing`);
+  use it for bootstrap replicates or very large models.
 - `aggregate::Bool=true`: collapse identical response patterns before running EM (exact;
   disabled automatically with covariates)
 - `multithreaded::Bool=false`: run the starts on all Julia threads (results are identical
@@ -60,8 +67,9 @@ averaged over the sample. Response-pattern aggregation is disabled with covariat
 # Returns
 - [`LCAModel`](@ref). A single aggregated warning reports any raised [`FitFlags`](@ref)
   (non-convergence, boundary probabilities, empty classes, a best log-likelihood found by
-  a single start, diverging covariate coefficients under quasi-complete separation). A
-  warning is also issued when the model is not identified by the necessary condition
+  a single start, diverging covariate coefficients under quasi-complete separation) and
+  any standard errors that could not be computed. A warning is also issued when the
+  model is not identified by the necessary condition
   `(k - 1) + k·Σ_j (C_j - 1) ≤ ∏_j C_j - 1`.
 
 # Example
@@ -117,14 +125,16 @@ function StatsAPI.fit(::Type{LCAModel}, d::LCAData, k::Integer;
         class_probs = θ.class_probs
         diverged = false
     end
+    # The covariance matrix reuses the workspace (its posterior was expanded above)
+    vc, se_msgs = _fit_vcov(θ, ws, opts, diverged)
 
     flags = FitFlags(converged, _count_boundary(θ.item_probs),
                      findall(<(1e-6), class_probs), replicated, diverged)
-    msgs = _flag_messages(flags, opts)
+    msgs = vcat(_flag_messages(flags, opts), se_msgs)
     isempty(msgs) || @warn "$K-class fit: " * join(msgs, "; ")
 
     return LCAModel(K, ws.J, copy(d.n_categories), class_probs, θ.item_probs, beta, d,
-                    posterior, ll, converged, iterations, start_loglik, opts, nothing, flags)
+                    posterior, ll, converged, iterations, start_loglik, opts, vc, flags)
 end
 
 function StatsAPI.fit(::Type{LCAModel}, d::LCAData, ks::AbstractVector{<:Integer}; kwargs...)

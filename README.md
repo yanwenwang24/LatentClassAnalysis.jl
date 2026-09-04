@@ -34,9 +34,12 @@ Research 61:100628, [doi:10.1016/j.alcr.2024.100628](https://doi.org/10.1016/j.a
   `DataFrame(diagnostics(models))` tabulates log-likelihood, AIC, BIC, sBIC, and entropy
 - Class profiles as a printed report (`show_profiles`) or as a table (`profiles`)
 
-Coming in the 0.3.0 release (see [CHANGELOG.md](CHANGELOG.md)): covariates for class
-membership (latent class regression), standard errors and confidence intervals, and a
-bootstrap likelihood-ratio test for the number of classes.
+- Covariates for class membership (latent class regression) and standard errors and
+  confidence intervals from the observed information matrix (`coeftable`, and the
+  `se`/`lower`/`upper` columns of `profiles`)
+
+Coming in the 0.3.0 release (see [CHANGELOG.md](CHANGELOG.md)): a bootstrap
+likelihood-ratio test for the number of classes.
 
 ## Installation
 

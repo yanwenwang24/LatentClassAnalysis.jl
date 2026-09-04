@@ -1,6 +1,7 @@
 using Test
 using LatentClassAnalysis
 using DataFrames
+using LinearAlgebra
 using StableRNGs
 using Tables
 
@@ -82,14 +83,23 @@ using Tables
         @test isempty(DataFrame(ModelDiagnostics[]))
     end
 
-    @testset "Inference placeholders" begin
-        @test m.vcov === nothing
-        @test_throws ErrorException vcov(m)
-        @test_throws ErrorException stderror(m)
+    @testset "Inference verbs" begin
+        @test m.vcov isa Matrix{Float64}
+        @test size(vcov(m)) == (dof(m), dof(m))
+        @test stderror(m) == sqrt.(diag(vcov(m)))
+        @test length(coef(m)) == length(coefnames(m)) == dof(m)
+        @test size(confint(m)) == (dof(m), 2)
+        @test length(coeftable(m)) == dof(m)
+        @test size(informationmatrix(m)) == (dof(m), dof(m))
         prof = profiles(m)
         @test length(prof) == sum(d.n_categories) * 2
-        @test all(isnan(r.se) && isnan(r.lower) && isnan(r.upper) for r in prof)
+        @test all(isfinite(r.se) && r.lower <= r.prob <= r.upper for r in prof)
         @test_throws ArgumentError profiles(m; level=1.5)
+        mn = fit(LCAModel, d, 2; rng=StableRNG(1), n_starts=2, n_final=1, se=:none)
+        @test mn.vcov === nothing
+        @test_throws ErrorException vcov(mn)
+        @test_throws ErrorException stderror(mn)
+        @test all(isnan(r.se) && isnan(r.lower) && isnan(r.upper) for r in profiles(mn))
     end
 
     @testset "Bootstrap placeholders" begin

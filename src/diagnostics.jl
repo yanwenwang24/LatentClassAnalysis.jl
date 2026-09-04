@@ -29,6 +29,32 @@ StatsAPI.loglikelihood(m::LCAModel) = m.loglik
 StatsAPI.loglikelihood(m::LCAModel, d::LCAData) = _posterior_and_ll(m, d)[2]
 
 """
+    aic(m::LCAModel) -> Float64
+
+Akaike information criterion, `-2·loglikelihood(m) + 2·dof(m)`; lower is better.
+"""
+StatsAPI.aic(m::LCAModel) = -2 * loglikelihood(m) + 2 * dof(m)
+
+"""
+    bic(m::LCAModel) -> Float64
+
+Bayesian information criterion, `-2·loglikelihood(m) + dof(m)·log(nobs(m))`; lower is
+better. The usual criterion for choosing the number of classes.
+"""
+StatsAPI.bic(m::LCAModel) = -2 * loglikelihood(m) + dof(m) * log(nobs(m))
+
+"""
+    aicc(m::LCAModel) -> Float64
+
+Corrected AIC for small samples, `aic(m) + 2·dof·(dof + 1) / (nobs - dof - 1)`.
+"""
+function StatsAPI.aicc(m::LCAModel)
+    k = dof(m)
+    n = nobs(m)
+    return aic(m) + 2 * k * (k + 1) / (n - k - 1)
+end
+
+"""
     isfitted(m::LCAModel) -> Bool
 
 Always `true`: an `LCAModel` is only ever created by [`fit`](@ref).

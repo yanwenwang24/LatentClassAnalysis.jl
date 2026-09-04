@@ -329,13 +329,17 @@ class of `beta`.
 - `start_loglik::Vector{Float64}`: log-likelihood reached by every start (short runs keep
   their short-run value); its maximum is `loglik`
 - `options::LCAOptions`: the settings used
-- `vcov::Union{Nothing,Matrix{Float64}}`: covariance matrix of [`coef`](@ref), or `nothing`
+- `vcov::Union{Nothing,Matrix{Float64}}`: `dof × dof` covariance matrix of [`coef`](@ref)
+  from the observed information matrix (`se=:hessian`, the default), with `NaN` rows and
+  columns for parameters on the boundary; `nothing` when fitted with `se=:none`. Read it
+  through [`vcov`](@ref), [`stderror`](@ref), [`confint`](@ref) and [`coeftable`](@ref)
 - `flags::FitFlags`: post-fit warnings, see [`FitFlags`](@ref)
 
 Use [`predict`](@ref)/[`classify`](@ref) for memberships, [`profiles`](@ref) and
-[`show_profiles`](@ref) for the item-response profiles, and [`diagnostics`](@ref),
-[`loglikelihood`](@ref), [`aic`](@ref), [`bic`](@ref), [`sbic`](@ref), [`entropy`](@ref)
-for fit statistics.
+[`show_profiles`](@ref) for the item-response profiles (with delta-method standard
+errors), [`coeftable`](@ref) for the parameters on the logit scale, and
+[`diagnostics`](@ref), [`loglikelihood`](@ref), [`aic`](@ref), [`bic`](@ref),
+[`sbic`](@ref), [`entropy`](@ref) for fit statistics.
 
 The 0.2 constructor `LCAModel(n_classes, n_items, n_categories)` throws an
 `ArgumentError`; fit models with `fit(LCAModel, data, k)` instead.

@@ -56,6 +56,7 @@ using StableRNGs
         @test occursin("best of 4 start(s)", s)
         @test occursin("class sizes: ", s)
         @test occursin("fit flags: none", s)
+        @test occursin("standard errors: observed information", s)
         @test !occursin("covariates", s)
         @test sprint(show, model; context=:compact => true) == "LCAModel(2 classes, 5 items, n = 300)"
         @test occursin("LCAModel with 2 classes", sprint(show, MIME("text/plain"), model))
@@ -126,7 +127,7 @@ using StableRNGs
         @test isapprox(sum(sizes), 100.0; atol=0.11)
         @test all(isapprox.(sizes, model.class_probs .* 100; atol=0.051))
 
-        mt = match(r"^1:\s+(\d+\.\d{3})%\s+(\d+\.\d{3})%"m, out)
+        mt = match(r"^1:\s+(\d+\.\d{3})% ±\S+\s+(\d+\.\d{3})% ±\S+"m, out)
         @test mt !== nothing
         vals = parse.(Float64, mt.captures)
         @test all(isapprox.(vals, model.item_probs[1][:, 1] .* 100; atol=0.00051))
@@ -137,9 +138,9 @@ using StableRNGs
         @test occursin(r"\d+\.\d%", out1)
         @test !occursin(r"\d+\.\d{2,}%", out1)
         out0 = sprint(io -> show_profiles(model; digits=0, io=io))
-        @test occursin(r"^1:\s+\d+%\s+\d+%"m, out0)
+        @test occursin(r"^1:\s+\d+% ±\d+\s+\d+% ±\d+"m, out0)
         out4 = sprint(io -> show_profiles(model; digits=4, io=io))
-        @test occursin(r"^1:\s+\d+\.\d{4}%\s+\d+\.\d{4}%"m, out4)
+        @test occursin(r"^1:\s+\d+\.\d{4}% ±\d+\.\d{4}\s+\d+\.\d{4}% ±\d+\.\d{4}"m, out4)
         @test_throws ArgumentError show_profiles(model; digits=-1, io=IOBuffer())
     end
 
@@ -192,7 +193,8 @@ using StableRNGs
         @test prof[1].prob == model.item_probs[1][1, 1]
         @test prof[2].class == 2 && prof[2].prob == model.item_probs[1][2, 1]
         @test prof[3].level == "2"
-        @test all(isnan, (prof[1].se, prof[1].lower, prof[1].upper))
+        @test all(isfinite, (prof[1].se, prof[1].lower, prof[1].upper))
+        @test prof[1].lower <= prof[1].prob <= prof[1].upper
         @test [r.level for r in prof if r.item == :x3 && r.class == 1] == ["no", "yes"]
         @test [r.level for r in prof if r.item == :x5 && r.class == 2] == ["false", "true"]
         pdf = DataFrame(prof)
