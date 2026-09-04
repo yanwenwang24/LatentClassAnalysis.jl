@@ -16,9 +16,11 @@ Statistically, LCA is a finite mixture model for categorical indicators: the
 population is modelled as a mixture of ``K`` groups, and within each group the
 indicators are assumed to be independent of one another (*local independence*). The
 parameters are the size of each class and, for every item, the probability of each
-response category within each class. They are estimated by maximum likelihood using
-the EM algorithm, and the number of classes is chosen by comparing information
-criteria across models. See [Methodology](@ref) for the details.
+response category within each class. LatentClassAnalysis.jl estimates them by maximum
+likelihood with the EM algorithm run from many random starting values, accepts data from
+any Tables.jl source with missing responses in the indicators, and reports the
+information criteria and entropy used to choose the number of classes. See
+[Methodology](@ref) for the details.
 
 ## Installation
 
@@ -32,50 +34,69 @@ The package supports Julia 1.10 and later.
 ## Quick example
 
 The example below simulates 500 respondents from two hidden groups, each answering
-five yes/no items, and recovers the groups. Everything the package exports is used
-once: [`prepare_data`](@ref) recodes a `DataFrame`, [`LCAModel`](@ref) sets up a model
-with random starting values, [`fit!`](@ref) runs the EM algorithm, [`diagnostics!`](@ref)
-computes fit statistics, [`show_profiles`](@ref) prints the class profiles, and
-[`predict`](@ref) returns class assignments and posterior probabilities.
+five yes/no items, and recovers the groups. [`prepare_data`](@ref) recodes the
+indicator columns of a table into an [`LCAData`](@ref); [`fit`](@ref) estimates one
+model per requested number of classes, each from 20 random starts;
+[`diagnostics`](@ref) collects the fit statistics of every model into a table that
+`DataFrame` can display; [`show_profiles`](@ref) prints the class profiles of the
+selected model; and [`classify`](@ref) and [`predict`](@ref) return the class
+assignments and the posterior membership probabilities.
 
 ```@example quick
-using LatentClassAnalysis, DataFrames, Random
+using LatentClassAnalysis, DataFrames, StableRNGs
 
-Random.seed!(1)
+# Simulate 500 respondents from two hidden groups with different response tendencies
+rng = StableRNG(1)
 n = 500
-cls = rand(1:2, n)                                   # two hidden groups
-item(p1, p2) = [rand() < (c == 1 ? p1 : p2) ? 1 : 0 for c in cls]
+cls = rand(rng, 1:2, n)
+item(p1, p2) = [rand(rng) < (c == 1 ? p1 : p2) ? 1 : 0 for c in cls]
 df = DataFrame(item1 = item(0.9, 0.2), item2 = item(0.8, 0.3), item3 = item(0.85, 0.25),
                item4 = item(0.7, 0.2), item5 = item(0.9, 0.3))
 
-data, n_categories = prepare_data(df, :item1, :item2, :item3, :item4, :item5)
-model = LCAModel(2, size(data, 2), n_categories)
-ll = fit!(model, data)
-diag = diagnostics!(model, data, ll)
-show_profiles(model, df, [:item1, :item2, :item3, :item4, :item5])
+# 1. Recode the indicators (any Tables.jl table works, not only a DataFrame)
+d = prepare_data(df, [:item1, :item2, :item3, :item4, :item5])
+
+# 2. Fit models with one to three classes; each fit uses 20 random starts
+models = fit(LCAModel, d, 1:3; rng = StableRNG(1))
+
+# 3. Compare them and pick the number of classes by BIC
+DataFrame(diagnostics(models))
 ```
 
-The profile shows that one class answers "1" on every item with high probability
-and the other rarely does, which is how the data were generated. Finally,
-[`predict`](@ref) returns each respondent's most likely class and the posterior
-probability of each class:
+BIC is smallest for the two-class model, which is how the data were generated (the
+three-class fit also prints a warning, not shown here, that some response probabilities
+were estimated at exactly 0 or 1, a symptom of asking for more classes than the data
+support). The profile of the selected model shows one class that answers `1` on every
+item with high probability and one that rarely does:
 
 ```@example quick
-assignments, probabilities = predict(model, data)
+best = models[argmin(bic.(models))]     # the two-class model
+show_profiles(best)                     # class sizes and response probabilities per class
 ```
 
-Starting values are drawn from Julia's global random number generator, so call
-`Random.seed!` before constructing a model if you need a reproducible fit.
+Finally, [`classify`](@ref) returns each respondent's most likely class and
+[`predict`](@ref) the posterior probability of each class:
+
+```@example quick
+df.class = classify(best)               # most likely class of every row
+posterior = predict(best)               # 500 × 2 matrix of posterior probabilities
+first(df, 5)
+```
+
+Fits are reproducible for a given `rng`: the random starts are seeded from it, so the
+same generator and the same data always give the same model.
 
 ## Where to go next
 
 - [Getting started](@ref): a complete walk-through on simulated data, from a
-  `DataFrame` with mixed column types to choosing the number of classes and attaching
-  class assignments to the data.
-- [Methodology](@ref): the model, the EM algorithm, the fit statistics, and
-  identifiability, written for social scientists.
+  `DataFrame` with mixed column types to choosing the number of classes, reading the
+  profiles, handling missing responses, and attaching class assignments to the data.
+- [Methodology](@ref): the model, the EM algorithm with random restarts, missing data,
+  the fit statistics, and identifiability, written for social scientists.
 - [Example: childlessness in Singapore](@ref): a replication of a published
   latent class analysis using the data bundled with the package.
+- [Upgrading from 0.2](@ref): every 0.2 call next to its 0.3 replacement, and what
+  changed in the results.
 - [API reference](@ref): docstrings of every exported function and type.
 - [Changelog](@ref): what changed in each release.
 
@@ -101,6 +122,7 @@ originally developed [wang2024](@cite):
 ## Related software
 
 Comparable tools in other environments include the R package poLCA
-[linzer2011](@cite), Mplus, and Latent GOLD. LatentClassAnalysis.jl currently
-implements the basic latent class model without covariates; see
-[Limitations of the current version and roadmap](@ref limitations) for what is planned.
+[linzer2011](@cite), Mplus, and Latent GOLD. LatentClassAnalysis.jl implements the
+unconditional latent class model with random restarts and missing-data support;
+covariates, standard errors, and the bootstrap likelihood-ratio test are coming in the
+0.3.0 release, see [What is coming in the 0.3.0 release](@ref roadmap).

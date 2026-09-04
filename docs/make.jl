@@ -12,6 +12,32 @@ let src = joinpath(@__DIR__, "..", "CHANGELOG.md"),
     end
 end
 
+# Stopgap for this build: docstrings in src/ cross-reference `coef`, `aic` and `bic` with
+# `@ref`, but the package has no docstring for these StatsAPI generics yet (`aic`/`bic`
+# use the StatsAPI defaults, `coef` has no method until standard errors land). Documenter
+# can only resolve an `@ref` to a documented object, so document the three bindings in the
+# package module here. Delete this block once src/ carries their docstrings.
+Core.eval(LatentClassAnalysis, quote
+    @doc """
+        aic(m::LCAModel) -> Float64
+
+    Akaike information criterion, `-2·loglikelihood(m) + 2·dof(m)` (the StatsAPI default).
+    """ aic
+    @doc """
+        bic(m::LCAModel) -> Float64
+
+    Bayesian information criterion, `-2·loglikelihood(m) + dof(m)·log(nobs(m))` (the
+    StatsAPI default).
+    """ bic
+    @doc """
+        coef(m::LCAModel) -> Vector{Float64}
+
+    Free parameters of the model on the logit scale, `dof(m)` in total: the
+    class-membership block first, then the item-response logits. Coming in the 0.3.0
+    release; there is no method in this build.
+    """ coef
+end)
+
 DocMeta.setdocmeta!(
     LatentClassAnalysis,
     :DocTestSetup,
@@ -36,6 +62,7 @@ makedocs(;
         "Getting started" => "tutorial.md",
         "Methodology" => "methodology.md",
         "Example: childlessness in Singapore" => "example_childless.md",
+        "Upgrading from 0.2" => "migration.md",
         "API reference" => "api.md",
         "Changelog" => "changelog.md",
     ],

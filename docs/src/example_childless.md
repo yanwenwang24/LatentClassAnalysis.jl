@@ -13,7 +13,7 @@ available as a script in `examples/example_childless.jl`.
 ## The data
 
 ```@example childless
-using LatentClassAnalysis, Arrow, DataFrames, Random, Statistics
+using LatentClassAnalysis, Arrow, DataFrames, StableRNGs, Statistics
 
 df = Arrow.Table(joinpath(pkgdir(LatentClassAnalysis), "examples", "childless_df.arrow")) |> DataFrame
 size(df)
@@ -39,113 +39,136 @@ indicators = [:age_fmarry, :marry_end, :infertility, :edu, :ocp20s, :ocp30s, :fl
 first(df[:, indicators], 5)
 ```
 
-## Preparing the data
+String columns are coded in alphabetical order unless told otherwise, so we spell out
+the substantive order of the four string indicators. The order affects only how the
+profiles are displayed, not the fit.
 
 ```@example childless
-data, n_categories = prepare_data(df, indicators...)
-n_categories
+occupations = ["Unemployed", "Blue-collared", "Semi-professional", "Professional"]
+levels = Dict(:age_fmarry => ["no", "early", "norm", "late"],
+              :edu => ["low", "middle", "high"],
+              :ocp20s => occupations,
+              :ocp30s => occupations)
+nothing # hide
 ```
-
-Two of the indicators have four categories, one has three, and five are binary.
 
 ## Choosing the number of classes
 
-We fit models with two to six classes, seeding the random number generator before
-each model so that the page is reproducible, and collect the fit statistics in a
-table.
+`fit(LCAModel, table, items, ks)` prepares the table and fits one model per class
+count, each from 20 random starts of which the 4 best are continued to convergence.
+We fit models with two to six classes with a fixed random number generator so that
+the page is reproducible.
 
 ```@example childless
-results = DataFrame(k = Int[], loglik = Float64[], npar = Int[],
-                    AIC = Float64[], BIC = Float64[], sBIC = Float64[], entropy = Float64[])
-models = Dict{Int,LCAModel}()
-
-for k in 2:6
-    Random.seed!(1024)
-    model = LCAModel(k, size(data, 2), n_categories)
-    ll = fit!(model, data)
-    d = diagnostics!(model, data, ll)
-    npar = (k - 1) + k * sum(n_categories .- 1)
-    push!(results, (k, ll, npar, d.aic, d.bic, d.sbic, d.entropy))
-    models[k] = model
-end
-results
+models = fit(LCAModel, df, indicators, 2:6; levels = levels, rng = StableRNG(1024))
+selection = DataFrame(diagnostics(models))
 ```
 
-BIC, which penalises each parameter most heavily, is minimised at the four-class
-model in this run, while AIC and sBIC keep decreasing as classes are added. We
-select by BIC, as recommended in [Choosing the number of classes](@ref choosing-k).
+If you run this yourself, every fit prints a warning (log messages are not captured
+on this page) that some response probabilities were estimated at exactly 0 or 1;
+with 493 respondents and rare responses such as unemployment in the twenties, some
+cells are empty within a class, and their probabilities go to the boundary. The
+number of such cells grows with the number of classes.
+
+BIC, which penalises each parameter most heavily, is minimised at the five-class
+model, while AIC and sBIC keep decreasing as classes are added. We select by BIC, as
+recommended in [Choosing the number of classes](@ref choosing-k).
 
 ```@example childless
-best_k = results.k[argmin(results.BIC)]
+best = models[argmin(selection.bic)]
 ```
+
+Printing the model shows its fit, the class sizes (classes are numbered by decreasing
+size), and the fit flags; here the only flag is the boundary count discussed above.
+
+### Was the maximum found?
+
+Each model was fitted from 20 random starts. `start_loglik` holds the log-likelihood
+reached by every start — the final value for the four starts that were continued to
+convergence and the value after 50 iterations for the others — so sorting it shows
+whether the best solution was reached more than once:
+
+```@example childless
+sort(best.start_loglik; rev = true)[1:6]
+```
+
+All four continued starts reached the same log-likelihood, and
+`best.flags.best_ll_replicated` records this:
+
+```@example childless
+best.flags.best_ll_replicated
+```
+
+Had the best value appeared only once, `fit` would have warned and the model should
+be refitted with larger `n_starts` and `n_final`.
 
 ## Class profiles
 
 ```@example childless
-best = models[best_k]
-show_profiles(best, df, indicators;
+show_profiles(best;
               var_names = ["Marriage timing", "Marriage dissolved", "Infertility", "Education",
                            "Occupation in 20s", "Occupation in 30s", "Flexible work", "Family leave"])
 ```
 
 ## Class assignments
 
+[`classify`](@ref) gives every respondent's most likely class, which we attach to the
+data and summarise by sex and age. The mean of the largest posterior probability
+per class says how confidently its members are assigned.
+
 ```@example childless
-assignments, posterior = predict(best, data)
-df.class = assignments
-combine(groupby(df, :class), nrow => :n, :female => mean => :share_female, :age => mean => :mean_age)
+df.class = classify(best)
+df.max_posterior = vec(maximum(predict(best); dims = 2))
+combine(groupby(df, :class), nrow => :n,
+        :female => mean => :share_female, :age => mean => :mean_age,
+        :max_posterior => mean => :mean_max_posterior)
 ```
 
 ## Interpretation
 
 Read each table column by column: within a class, the entries for an item give the
-probability of each response. The classes that come out of this run are
-distinguished mainly by marriage timing, education, and occupation, while the
-availability of flexible work and family leave differs little between them. One
-class combines never marrying with low education and blue-collar or no employment;
-another combines never marrying with high education and professional occupations;
-a third also consists largely of the never married but with middle or high
-education and semi-professional occupations, and is the largest class; and the
-remaining, smallest, class is the only one whose members mostly married, typically
-late, and it carries most of the marital dissolution and reported infertility in
-the sample. Class numbers are arbitrary and can change with the seed, so identify
-the classes by these profiles rather than by their numbers. Readers can compare
-these profiles with the named pathways in [wang2024](@cite).
+probability of each response. Four of the five classes consist mainly of people who
+never married, and they are separated by education and occupation; the fifth is the
+only one whose members married.
+
+- **Class 1**, the largest, never married with middle or high education and
+  semi-professional work in both decades.
+- **Class 2** never married with low education and blue-collar work, and had the
+  least access to flexible work and family leave.
+- **Class 3** never married with high education and professional occupations.
+- **Class 4** never married with low education and unemployment or blue-collar work in
+  the twenties, yet reports flexible work arrangements and family leave almost
+  universally.
+- **Class 5**, the smallest, is the only class whose members married, typically late,
+  and it carries most of the reported infertility and marital dissolution in the
+  sample.
+
+The availability of flexible work and family leave distinguishes class 4 but differs
+little among the other classes. Class numbers follow class size, so identify the
+classes by these profiles rather than by their numbers. Readers can compare these
+profiles with the named pathways in [wang2024](@cite).
 
 ## Differences from the published analysis
 
-- **Single random start.** Each model above is fitted once from the starting
-  values drawn after `Random.seed!(1024)`. Other seeds can reach a different local
-  maximum with a slightly different log-likelihood, as the table below shows; for a
-  publishable analysis, refit from many seeds and keep the best fit (see
-  [Caveats](@ref)).
+- **Number of classes.** With random restarts, the four continued starts of every
+  model agree on the maximum, so the selection above is a property of the data and
+  the criteria rather than of a seed; BIC selects five classes here. Compare with the
+  solution reported in the article before drawing conclusions from any single
+  criterion, and consider the substantive interpretability of the extra class, as
+  discussed in [Choosing the number of classes](@ref choosing-k).
+- **No survey weights.** The `weights` column is ignored; the package does not
+  support weighted estimation.
+- **Category order.** By default [`prepare_data`](@ref) orders the levels of a string
+  column alphabetically (education would be listed as `high`, `low`, `middle`). The
+  `levels` keyword, used above through `fit`, fixes the order per item; the same
+  keyword works with [`prepare_data`](@ref) directly:
 
 ```@example childless
-seeds = [1, 2, 3, 42, 1024]
-fits = map(seeds) do seed
-    Random.seed!(seed)
-    m = LCAModel(best_k, size(data, 2), n_categories)
-    (seed = seed, loglik = fit!(m, data))
-end
-DataFrame(fits)
-```
-
-- **No survey weights.** The `weights` column is ignored; the package does not
-  support weighted estimation yet.
-- **Category order.** [`prepare_data`](@ref) orders the levels of a string column
-  alphabetically, which is why the tables above list education as
-  `high`, `low`, `middle` and marriage timing as `early`, `late`, `no`, `norm`. The
-  order does not affect the fit, only the display. To show the categories in a
-  substantive order, convert the column to a `CategoricalArray` with explicit levels
-  before calling `prepare_data`:
-
-```julia
-using CategoricalArrays
-df.edu = categorical(df.edu; levels = ["low", "middle", "high"])
-df.age_fmarry = categorical(df.age_fmarry; levels = ["no", "early", "norm", "late"])
+d = prepare_data(df, indicators; levels = levels)
 ```
 
 - **No covariates or standard errors.** Any analysis in the article that relates
   class membership to other characteristics, or that reports uncertainty around the
-  estimates, is not reproduced here; see
-  [Limitations of the current version and roadmap](@ref limitations).
+  estimates, is not reproduced here; both are coming in the 0.3.0 release, see
+  [What is coming in the 0.3.0 release](@ref roadmap). The columns `female`, `age`,
+  `race`, `nativity` and `sibs` are in the data set for that purpose.

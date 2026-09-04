@@ -7,89 +7,74 @@
 using CategoricalArrays
 using DataFrames
 using LatentClassAnalysis
-using Random
+using StableRNGs
 
-# Generate synthetic data
-Random.seed!(123)
-n_samples = 1000
+# ---------------------------------------------------------------------------------------
+# Simulate data: 1000 respondents from two hidden classes answering five items
+# ---------------------------------------------------------------------------------------
+rng = StableRNG(123)
+n = 1000
+true_class = rand(rng, 1:2, n)
 
-# True class assignments (2 latent classes)
-true_classes = rand(1:2, n_samples)
-
-# Binary responses with class-specific probabilities of answering 1:
-# class 1 answers 1 with probability 0.8, class 2 with probability 0.3
-function generate_response(class)
-    p = class == 1 ? 0.8 : 0.3
-    return rand() < p ? 1 : 2
-end
-
-# Create DataFrame with three informative items and two uninformative categorical items
+# Items 1-3 are informative: class 1 answers "yes" with probability 0.8, class 2 with 0.3.
+# Items 4-5 are noise: both classes answer "Yes"/"No" at random. Item 4 is a string
+# column and item 5 a CategoricalArray, to show that any column type is accepted.
+yes(c) = rand(rng) < (c == 1 ? 0.8 : 0.3) ? 1 : 0
 df = DataFrame(
-    item1 = [generate_response(c) for c in true_classes],
-    item2 = [generate_response(c) for c in true_classes],
-    item3 = [generate_response(c) for c in true_classes],
-    item4 = categorical([rand(["Yes", "No"]) for _ in 1:n_samples]),
-    item5 = categorical([rand(["Yes", "No"]) for _ in 1:n_samples])
+    item1 = [yes(c) for c in true_class],
+    item2 = [yes(c) for c in true_class],
+    item3 = [yes(c) for c in true_class],
+    item4 = [rand(rng, ("Yes", "No")) for _ in 1:n],
+    item5 = categorical([rand(rng, ("Yes", "No")) for _ in 1:n]; levels = ["Yes", "No"]),
 )
+items = [:item1, :item2, :item3, :item4, :item5]
 
-# Step 1: Data Preparation
-data, n_categories = prepare_data(df, :item1, :item2, :item3, :item4, :item5)
+# ---------------------------------------------------------------------------------------
+# Step 1: prepare the data (any Tables.jl table; missing values would be allowed)
+# ---------------------------------------------------------------------------------------
+d = prepare_data(df, items)
+println(d)
 
-# Step 2: Model Selection - Try different numbers of classes
-results = []
-for n_classes in 2:4
-    println("\nFitting model with $n_classes classes...")
+# ---------------------------------------------------------------------------------------
+# Step 2: fit models with one to four classes and compare them
+# ---------------------------------------------------------------------------------------
+# Every fit runs 20 random starts and continues the 4 best to convergence; pass an rng
+# for a reproducible result. Fits with too many classes typically print a warning about
+# response probabilities on the boundary (0 or 1).
+models = fit(LCAModel, d, 1:4; rng = StableRNG(1))
 
-    # Initialize model
-    model = LCAModel(n_classes, size(data, 2), n_categories)
+selection = DataFrame(diagnostics(models))
+println("\nModel selection:")
+println(selection)
 
-    # Fit model and get log-likelihood
-    ll = fit!(model, data, verbose=true)
+best = models[argmin(selection.bic)]
+println("\nBest model by BIC has $(best.n_classes) classes")
+println(best)
 
-    # Calculate diagnostics
-    diag = diagnostics!(model, data, ll)
+# ---------------------------------------------------------------------------------------
+# Step 3: inspect the selected model
+# ---------------------------------------------------------------------------------------
+# Class profiles: class sizes and, for every item, the response probabilities per class.
+# Classes are ordered by size, so class 1 is the largest.
+show_profiles(best)
 
-    # Store results
-    push!(results, (
-        n_classes = n_classes,
-        model = model,
-        diagnostics = diag
-    ))
+# The same numbers as a table (the se/lower/upper columns are filled once standard
+# errors are available; they are NaN in this version)
+println(first(DataFrame(profiles(best)), 6))
 
-    println("Log-likelihood: $(diag.ll)")
-    println("AIC: $(diag.aic)")
-    println("BIC: $(diag.bic)")
-    println("SBIC: $(diag.sbic)")
-    println("Entropy: $(diag.entropy)")
-end
+# Posterior membership probabilities and modal class assignments
+posterior = predict(best)
+df.class = classify(best)
+df.max_posterior = vec(maximum(posterior; dims = 2))
 
-# Find best model based on BIC
-best = argmin(r -> r.diagnostics.bic, results)
-best_model = best.model
-println("\nBest model has $(best.n_classes) classes based on BIC")
+println("\nAssigned class sizes:")
+println(combine(groupby(df, :class), nrow => :n))
 
-# Step 3: Analyze best model
-# Get predictions
-assignments, probabilities = predict(best_model, data)
+println("\nFirst rows with their assignment:")
+println(first(df, 5))
 
-# Add predicted classes to original DataFrame
-df[!, :predicted_class] = assignments
-
-# Calculate class sizes
-class_sizes = [sum(assignments .== k) / length(assignments) for k in 1:best.n_classes]
-println("\nClass sizes:")
-for (k, size) in enumerate(class_sizes)
-    println("Class $k: $(round(size * 100, digits=1))%")
-end
-
-# Show item response probabilities for each class
-show_profiles(best_model, df, [:item1, :item2, :item3, :item4, :item5])
-
-# Example output for first few cases
-println("\nSample of individual predictions:")
-first_few = 5
-println("Row\tMost Likely Class\tClass Probabilities")
-for i in 1:first_few
-    probs = round.(probabilities[i, :], digits=3)
-    println("$i\t$(assignments[i])\t\t$probs")
-end
+# Because the data are simulated we can cross-tabulate the assignments against the truth
+# (class labels are arbitrary: each true class should map onto one estimated class)
+println("\nTrue class (rows) by assigned class (columns):")
+tab = combine(groupby(DataFrame(truth = true_class, class = df.class), [:truth, :class]), nrow => :n)
+println(unstack(tab, :truth, :class, :n))
