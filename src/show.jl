@@ -40,10 +40,27 @@ function Base.show(io::IO, m::LCAModel)
         print(io, "\n  ", status, "; best of ", n_starts, " start(s)")
     end
     print(io, "\n  class sizes: ", join([@sprintf("%.3f", p) for p in m.class_probs], "  "))
-    hascovariates(m) && print(io, "\n  covariates: ", join(string.(m.data.covariate_names[2:end]), ", "))
+    if hascovariates(m)
+        print(io, "\n  covariates: ", join(string.(m.data.covariate_names[2:end]), ", "))
+        K > 1 && _show_coefficients(io, m)
+    end
     hasmissing(m) && print(io, "\n  missing responses: ", sum(nmissing(m)))
     msgs = _flag_messages(m.flags, m.options)
     print(io, "\n  fit flags: ", isempty(msgs) ? "none" : join(msgs, "; "))
+    return nothing
+end
+
+# Coefficient table of the class-membership model: rows = covariates, columns = classes 2..K.
+function _show_coefficients(io::IO, m::LCAModel)
+    K = m.n_classes
+    names = string.(m.data.covariate_names)
+    w = max(9, maximum(length, names))
+    print(io, "\n  class-membership coefficients (log-odds against class 1):")
+    print(io, "\n    ", rpad("", w), join([lpad("class $k", 11) for k in 2:K]))
+    for p in eachindex(names)
+        print(io, "\n    ", rpad(names[p], w),
+              join([@sprintf("%11.4f", m.beta[p, k - 1]) for k in 2:K]))
+    end
     return nothing
 end
 

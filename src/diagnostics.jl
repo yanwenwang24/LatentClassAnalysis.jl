@@ -11,7 +11,8 @@ StatsAPI.nobs(m::LCAModel) = size(m.data.y, 1)
     dof(m::LCAModel) -> Int
 
 Number of free parameters: `(K - 1)·P + K·Σ_j (C_j - 1)`, where `P` is the number of
-columns of the class-membership design (`1` without covariates).
+columns of the class-membership design (`1` without covariates, `1 + ` the number of
+covariates for a model fitted with covariates).
 """
 StatsAPI.dof(m::LCAModel) =
     (m.n_classes - 1) * size(m.beta, 1) + m.n_classes * sum(c - 1 for c in m.n_categories; init=0)
@@ -21,7 +22,8 @@ StatsAPI.dof(m::LCAModel) =
     loglikelihood(m::LCAModel, d::LCAData) -> Float64
 
 Observed-data log-likelihood of the fitted model on its training data (the stored value)
-or on other data `d` with the same items (missing responses are skipped).
+or on other data `d` with the same items (missing responses are skipped). A model fitted
+with covariates needs the same covariates in `d`, see [`predict`](@ref).
 """
 StatsAPI.loglikelihood(m::LCAModel) = m.loglik
 StatsAPI.loglikelihood(m::LCAModel, d::LCAData) = _posterior_and_ll(m, d)[2]

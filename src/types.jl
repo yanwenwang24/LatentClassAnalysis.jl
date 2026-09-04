@@ -289,7 +289,9 @@ Post-fit diagnostics collected by [`fit`](@ref) and stored in the `flags` field 
 - `empty_classes::Vector{Int}`: classes with a size below `1e-6`
 - `best_ll_replicated::Bool`: the best log-likelihood was reached by at least two of the
   continued starts (trivially `true` when only one start was continued)
-- `coef_divergence::Bool`: a covariate coefficient diverged (quasi-complete separation)
+- `coef_divergence::Bool`: a covariate coefficient exceeds 20 in absolute value on the
+  standardized covariate scale, the signature of quasi-complete separation (a covariate
+  that determines class membership almost perfectly); the estimates are then unstable
 """
 struct FitFlags
     converged::Bool
@@ -311,11 +313,14 @@ class of `beta`.
 
 # Fields
 - `n_classes::Int`, `n_items::Int`, `n_categories::Vector{Int}`
-- `class_probs::Vector{Float64}`: class sizes (marginal membership probabilities)
+- `class_probs::Vector{Float64}`: class sizes (marginal membership probabilities; with
+  covariates, the covariate-specific membership probabilities averaged over the sample)
 - `item_probs::Vector{Matrix{Float64}}`: `item_probs[j]` is `n_classes × n_categories[j]`;
   row `k` holds the probability of each response category of item `j` in class `k`
 - `beta::Matrix{Float64}`: `P × (n_classes - 1)` multinomial-logit coefficients of the
-  class-membership model with class 1 as reference; without covariates `P == 1` and
+  class-membership model `log(π_k(x) / π_1(x)) = x'β_k` with class 1 as reference, on the
+  raw covariate scale; row `p` belongs to `data.covariate_names[p]` (row 1 is the
+  intercept) and column `k - 1` to class `k`. Without covariates `P == 1` and
   `beta[1, k-1] == log(class_probs[k] / class_probs[1])`
 - `data::LCAData`: the data the model was fitted to
 - `posterior::Matrix{Float64}`: `nobs × n_classes` posterior membership probabilities

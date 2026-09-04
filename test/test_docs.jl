@@ -63,7 +63,9 @@ using LatentClassAnalysis
         LCA = LatentClassAnalysis
         for obj in (LCA.FitFlags, LCA.LCAParams, LCA.LCAWorkspace, LCA.StartRecord, LCA.estep!,
                     LCA._accumulate!, LCA._update!, LCA._em!, LCA._multistart, LCA._init_random,
-                    LCA._init_split, LCA.check_identifiability)
+                    LCA._init_split, LCA.check_identifiability, LCA._standardize,
+                    LCA._coef_objective, LCA._coef_derivatives!, LCA._update_coefs!,
+                    LCA._class_prior)
             @test hasdoc(obj)
         end
     end

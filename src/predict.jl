@@ -18,7 +18,12 @@ New data are given as an [`LCAData`](@ref) with the same items (an item may show
 categories than the model, never more) or as any Tables.jl table, which is prepared with
 [`prepare_data`](@ref) using the training levels of every item (`drop_unused_levels=false`),
 so the coding matches the model even when a level is absent from the new table. Missing
-responses are skipped; a row with all indicators missing gets the class sizes.
+responses are skipped; a row with all indicators missing gets the class prior.
+
+A model fitted with covariates needs the same covariates in the new data (an `LCAData`
+with the same `covariate_names`, or a table with those columns; a missing column is an
+`ArgumentError`): the prior of every row is its covariate-specific membership probability
+`softmax(x_i'β)`. A model fitted without covariates ignores any covariates of the new data.
 
 Matrices are deliberately not accepted (the 0.2 method returned a tuple); wrap codes in
 `LCAData(y; n_categories=m.n_categories)`.
@@ -71,10 +76,17 @@ function _argmax_rows(post::AbstractMatrix{<:Real})
     return out
 end
 
-# Prepare a table with the coding of the training data.
+# Prepare a table with the coding of the training data (and its covariate columns).
 function _prepare_like(m::LCAModel, table)
     lev = Dict{Symbol,Vector{String}}(zip(m.data.item_names, m.data.item_levels))
     covs = hascovariates(m) ? m.data.covariate_names[2:end] : Symbol[]
+    if !isempty(covs) && Tables.istable(table)
+        available = collect(Tables.columnnames(Tables.columns(table)))
+        absent = filter(c -> !(c in available), covs)
+        isempty(absent) || throw(ArgumentError(
+            "the model was fitted with the covariate(s) $(join(string.(covs), ", ")); " *
+            "column(s) $(join(string.(absent), ", ")) are absent from the table"))
+    end
     return prepare_data(table, m.data.item_names; covariates=covs, levels=lev,
                         drop_unused_levels=false)
 end
@@ -87,18 +99,22 @@ function _check_compatible(m::LCAModel, d::LCAData)
             "item $(d.item_names[j]) has $(d.n_categories[j]) categories in the data but only $(m.n_categories[j]) in the model"))
     end
     if hascovariates(m)
-        size(d.X, 2) == size(m.beta, 1) || throw(ArgumentError(
-            "the data has $(size(d.X, 2) - 1) covariates but the model has $(size(m.beta, 1) - 1)"))
+        d.covariate_names == m.data.covariate_names || throw(ArgumentError(
+            "the model was fitted with the covariate(s) $(join(string.(m.data.covariate_names[2:end]), ", ")) " *
+            "but the data has " * (hascovariates(d) ? join(string.(d.covariate_names[2:end]), ", ") : "none")))
     end
     return nothing
 end
 
-# Posterior (n × K) and log-likelihood of the model on data d.
+# Posterior (n × K) and log-likelihood of the model on data d. With covariates the E-step
+# runs on the raw design of d with the raw-scale coefficients [0 beta].
 function _posterior_and_ll(m::LCAModel, d::LCAData)
     _check_compatible(m, d)
-    ws = LCAWorkspace(d, m.n_classes; aggregate=!hascovariates(m), covariates=hascovariates(m),
-                      n_categories=m.n_categories)
-    θ = LCAParams(m.class_probs, m.item_probs, nothing)
+    withcov = hascovariates(m)
+    ws = LCAWorkspace(d, m.n_classes; aggregate=!withcov, covariates=withcov,
+                      n_categories=m.n_categories, standardize=false)
+    coefs = withcov ? hcat(zeros(size(m.beta, 1)), m.beta) : nothing
+    θ = LCAParams(m.class_probs, m.item_probs, coefs)
     ll = estep!(ws, θ)
     return _expand_posterior(ws), ll
 end

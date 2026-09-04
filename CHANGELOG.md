@@ -8,12 +8,20 @@ All notable changes to this project are documented in this file. The format foll
 
 ### 0.3.0 (breaking; in development on branch `v0.3.0`)
 
-Still to come in 0.3.0: covariates on class membership (latent class regression), standard
-errors and confidence intervals (`coef`, `vcov`, `stderror`, `confint`, `coeftable`, the
-`se`/`lower`/`upper` columns of `profiles`), and `simulate`, `bootstrap`,
-`bootstrap_lrt`.
+Still to come in 0.3.0: standard errors and confidence intervals (`coef`, `vcov`,
+`stderror`, `confint`, `coeftable`, the `se`/`lower`/`upper` columns of `profiles`), and
+`simulate`, `bootstrap`, `bootstrap_lrt`.
 
 #### Added
+- Covariates on class membership (latent class regression): `prepare_data(table, items;
+  covariates=[:age, :female])` or `LCAData(y; covariates=X)` and `fit(LCAModel, d, k)`
+  fit the multinomial-logit membership model `log(π_k(x)/π_1(x)) = x'β_k` by EM with one
+  damped Newton step per M-step; `model.beta` holds the coefficients on the raw scale,
+  `model.class_probs` the sample-averaged membership probabilities, `dof` counts
+  `(k - 1)·P` membership parameters, `predict`/`classify`/`loglikelihood` on new data use
+  its covariates, and `show` prints the coefficient table. `covariates=false` fits the
+  unconditional model on the same data; a constant or collinear covariate is an error and
+  quasi-complete separation raises the `coef_divergence` fit flag.
 - `fit(LCAModel, data, k)` is the single entry point: EM with random restarts (`n_starts`
   short runs, the `n_final` best continued to convergence), a numerically stable
   log-sum-exp E-step, exact response-pattern aggregation, an `rng` keyword for

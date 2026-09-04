@@ -49,6 +49,36 @@ function simulate_lca(rng::AbstractRNG, n::Integer,
     return y, classes
 end
 
+"""
+    simulate_lca_reg(rng, X, beta, item_probs) -> (y::Matrix{Int}, classes::Vector{Int})
+
+Draw observations from a latent class regression model: row `i` of the `n × P` design `X`
+(intercept first) selects its class from `softmax(X[i, :]' * [0 beta])` with `beta` the
+`P × (K - 1)` coefficients of classes `2:K` against class 1, then answers every item from
+the class's response probabilities (as in [`simulate_lca`](@ref)).
+"""
+function simulate_lca_reg(rng::AbstractRNG, X::AbstractMatrix{<:Real},
+                          beta::AbstractMatrix{<:Real},
+                          item_probs::AbstractVector{<:AbstractMatrix{<:Real}})
+    n, P = size(X)
+    size(beta, 1) == P || throw(ArgumentError("beta must have $P rows, got $(size(beta, 1))"))
+    K = size(beta, 2) + 1
+    J = length(item_probs)
+    eta = X * beta
+    y = Matrix{Int}(undef, n, J)
+    classes = Vector{Int}(undef, n)
+    for i in 1:n
+        w = [1.0; exp.(eta[i, :])]
+        w ./= sum(w)
+        k = _draw_category(rng, w)
+        classes[i] = k
+        for j in 1:J
+            y[i, j] = _draw_category(rng, view(item_probs[j], k, :))
+        end
+    end
+    return y, classes
+end
+
 # Draw an index from a discrete distribution given by a probability vector.
 function _draw_category(rng::AbstractRNG, probs::AbstractVector{<:Real})
     u = rand(rng)
@@ -132,6 +162,20 @@ function max_abs_error(model::LCAModel, perm::AbstractVector{<:Integer},
     e_item = maximum(maximum(abs.(model.item_probs[j][perm, :] .- true_item_probs[j]))
                      for j in eachindex(true_item_probs))
     return e_class, e_item
+end
+
+"""
+    aligned_beta(model, perm) -> Matrix{Float64}
+
+Coefficients of `model` re-based to the class order `perm` (see [`align_classes`](@ref)):
+column `k - 1` of the result holds the log-odds coefficients of true class `k` against
+true class `1`, so it is comparable with the `beta` the data were simulated from.
+"""
+function aligned_beta(model::LCAModel, perm::AbstractVector{<:Integer})
+    P = size(model.beta, 1)
+    B = hcat(zeros(P), model.beta)[:, perm]
+    B .-= B[:, 1]
+    return B[:, 2:end]
 end
 
 """

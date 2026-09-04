@@ -17,6 +17,14 @@ model per element of `ks` (for model selection with [`diagnostics`](@ref)).
 the E-step under the missing-at-random assumption: the class sizes use every row and the
 response probabilities of an item use the rows where it is observed.
 
+With covariates (latent class regression) the class membership of observation `i` follows
+the multinomial-logit model `log(π_k(x_i) / π_1(x_i)) = x_i'β_k` for `k = 2, …, K`, with
+`x_i` the row of `d.X` (intercept first) and class 1 (the largest class) as reference.
+The M-step for `β` is one damped Newton step (generalized EM), so the log-likelihood
+still increases at every iteration. The covariates are standardized internally; the
+returned `beta` is on the raw scale and `class_probs` are the membership probabilities
+averaged over the sample. Response-pattern aggregation is disabled with covariates.
+
 # Arguments
 - `d::LCAData`: prepared data, see [`LCAData`](@ref) and [`prepare_data`](@ref)
 - `k::Integer`: number of latent classes (`≥ 1`)
@@ -26,11 +34,15 @@ response probabilities of an item use the rows where it is observed.
   a seeded generator for a reproducible fit
 - `covariates::Bool=hascovariates(d)`: fit the class-membership model on the covariates of
   `d` (latent class regression). `covariates=false` fits the unconditional model on the
-  same data, for nested comparisons. Not available in this version.
+  same data, for nested comparisons (its log-likelihood is never larger). A constant or
+  collinear covariate is an `ArgumentError`.
 - `init=nothing`: starting values used as the first start(s): an [`LCAModel`](@ref) with
   the same `k` and categories, an internal `LCAParams`, a `NamedTuple` with fields
   `class_probs` and `item_probs`, or a vector of those. If more starts are supplied than
-  `n_starts`, all of them are run.
+  `n_starts`, all of them are run. With covariates, the coefficients of an `LCAModel`
+  fitted with the same covariates seed the start; otherwise the slopes start at zero and
+  the intercepts at the log-odds of the supplied class probabilities. Every random start
+  begins with zero coefficients (uniform class sizes).
 - `n_starts::Integer=20`: number of starts
 - `n_final::Integer=4`: number of best short runs continued to convergence (capped at
   `n_starts`)
@@ -48,8 +60,9 @@ response probabilities of an item use the rows where it is observed.
 # Returns
 - [`LCAModel`](@ref). A single aggregated warning reports any raised [`FitFlags`](@ref)
   (non-convergence, boundary probabilities, empty classes, a best log-likelihood found by
-  a single start). A warning is also issued when the model is not identified by the
-  necessary condition `(k - 1) + k·Σ_j (C_j - 1) ≤ ∏_j C_j - 1`.
+  a single start, diverging covariate coefficients under quasi-complete separation). A
+  warning is also issued when the model is not identified by the necessary condition
+  `(k - 1) + k·Σ_j (C_j - 1) ≤ ∏_j C_j - 1`.
 
 # Example
 ```julia
@@ -58,6 +71,8 @@ d = prepare_data(table, [:x1, :x2, :x3, :x4])
 m = fit(LCAModel, d, 3; rng=StableRNG(1))
 models = fit(LCAModel, d, 1:4; rng=StableRNG(1))
 diagnostics(models)
+dr = prepare_data(table, [:x1, :x2, :x3, :x4]; covariates=[:age, :female])
+mr = fit(LCAModel, dr, 3; rng=StableRNG(1))     # latent class regression; mr.beta
 ```
 """
 function StatsAPI.fit(::Type{LCAModel}, d::LCAData, k::Integer;
@@ -70,17 +85,14 @@ function StatsAPI.fit(::Type{LCAModel}, d::LCAData, k::Integer;
     K = Int(k)
     K >= 1 || throw(ArgumentError("the number of classes must be at least 1, got $K"))
     nobs(d) >= 1 || throw(ArgumentError("the data has no observations"))
-    if covariates
-        hascovariates(d) || throw(ArgumentError(
-            "covariates=true requires data with covariates; pass them to prepare_data or LCAData"))
-        throw(ErrorException(_COVARIATES_NOT_IMPLEMENTED))
-    end
+    covariates && !hascovariates(d) && throw(ArgumentError(
+        "covariates=true requires data with covariates; pass them to prepare_data or LCAData"))
     opts = LCAOptions(; n_starts=Int(n_starts), n_final=min(Int(n_final), Int(n_starts)),
                       short_iters=Int(short_iters), max_iter=Int(max_iter), tol=Float64(tol),
-                      se=se, aggregate=aggregate, verbose=verbose)
+                      se=se, aggregate=aggregate && !covariates, verbose=verbose)
     check_identifiability(K, d.n_categories)
 
-    ws = LCAWorkspace(d, K; aggregate=opts.aggregate)
+    ws = LCAWorkspace(d, K; aggregate=opts.aggregate, covariates=covariates)
     if K == 1
         θ, ll = _fit_single_class(ws)
         start_loglik = [ll]
@@ -94,14 +106,24 @@ function StatsAPI.fit(::Type{LCAModel}, d::LCAData, k::Integer;
     _sort_by_size!(θ)
     ll = estep!(ws, θ)
     posterior = _expand_posterior(ws)
-    beta = _beta_from_probs(θ.class_probs)
+    if covariates
+        # K == 1 carries no coefficients; beta is then P × 0
+        coefs = θ.coefs === nothing ? zeros(size(d.X, 2), K) : θ.coefs
+        beta = (ws.A * coefs)[:, 2:K]                       # raw scale
+        class_probs = vec(mean(_class_prior(beta, d.X), dims=1))
+        diverged = maximum(abs, coefs; init=0.0) > COEF_DIVERGENCE_THRESHOLD
+    else
+        beta = _beta_from_probs(θ.class_probs)
+        class_probs = θ.class_probs
+        diverged = false
+    end
 
     flags = FitFlags(converged, _count_boundary(θ.item_probs),
-                     findall(<(1e-6), θ.class_probs), replicated, false)
+                     findall(<(1e-6), class_probs), replicated, diverged)
     msgs = _flag_messages(flags, opts)
     isempty(msgs) || @warn "$K-class fit: " * join(msgs, "; ")
 
-    return LCAModel(K, ws.J, copy(d.n_categories), θ.class_probs, θ.item_probs, beta, d,
+    return LCAModel(K, ws.J, copy(d.n_categories), class_probs, θ.item_probs, beta, d,
                     posterior, ll, converged, iterations, start_loglik, opts, nothing, flags)
 end
 

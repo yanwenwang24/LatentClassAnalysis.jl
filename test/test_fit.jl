@@ -235,7 +235,7 @@ const LCA = LatentClassAnalysis
         @test_throws ArgumentError fit(LCAModel, LCAData(y[1:0, :]; n_categories=fill(2, 6)), 2)
         @test_throws ArgumentError fit(LCAModel, d, 2; covariates=true)   # data without covariates
         dc = LCAData(y; covariates=randn(StableRNG(1), n))
-        @test_throws ErrorException fit(LCAModel, dc, 2; rng=StableRNG(1))          # not implemented yet
+        @test hascovariates(fit(LCAModel, dc, 2; rng=StableRNG(1), n_starts=2, n_final=1))  # regression fit
         mc = fit(LCAModel, dc, 2; rng=StableRNG(1), covariates=false)               # unconditional fit
         @test same_fit(mc, fit(LCAModel, d, 2; rng=StableRNG(1)))
         @test !hascovariates(mc)

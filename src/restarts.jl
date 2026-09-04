@@ -92,34 +92,69 @@ function _normalize_init!(θ::LCAParams)
     return θ
 end
 
-function _as_params(m::LCAModel, K, C)
-    hascovariates(m) && throw(ErrorException(_COVARIATES_NOT_IMPLEMENTED))
+# Give θ the coefficient matrix the workspace expects: with covariates, a missing `coefs`
+# becomes a P × K matrix whose intercept row carries the log-odds of the class probabilities
+# (zero for uniform classes) and whose slopes are zero; without covariates, `coefs` is
+# dropped.
+function _seed_coefs!(θ::LCAParams, ws::LCAWorkspace)
+    if !ws.covariates
+        θ.coefs = nothing
+    elseif θ.coefs === nothing
+        P, K = size(ws.Xst, 1), ws.K
+        coefs = zeros(P, K)
+        for k in 2:K
+            coefs[1, k] = log(θ.class_probs[k] / θ.class_probs[1])
+        end
+        θ.coefs = coefs
+    end
+    return θ
+end
+
+function _as_params(m::LCAModel, ws::LCAWorkspace)
+    K, C = ws.K, ws.C
     _check_init_dims(m.class_probs, m.item_probs, K, C)
-    return _normalize_init!(LCAParams(copy(m.class_probs), [copy(P) for P in m.item_probs], nothing))
+    θ = _normalize_init!(LCAParams(copy(m.class_probs), [copy(P) for P in m.item_probs], nothing))
+    if ws.covariates && hascovariates(m)
+        P = size(ws.Xst, 1)
+        size(m.beta, 1) == P || throw(ArgumentError(
+            "init model has $(size(m.beta, 1) - 1) covariates but the data has $(P - 1)"))
+        # Raw-scale coefficients (class 1 as reference) to the standardized scale
+        θ.coefs = ws.A \ hcat(zeros(P), m.beta)
+    end
+    return _seed_coefs!(θ, ws)
 end
 
-function _as_params(θ::LCAParams, K, C)
-    θ.coefs === nothing || throw(ErrorException(_COVARIATES_NOT_IMPLEMENTED))
+function _as_params(θ::LCAParams, ws::LCAWorkspace)
+    K, C = ws.K, ws.C
     _check_init_dims(θ.class_probs, θ.item_probs, K, C)
-    return _normalize_init!(copy(θ))
+    θc = _normalize_init!(copy(θ))
+    if θc.coefs !== nothing && ws.covariates
+        P = size(ws.Xst, 1)
+        size(θc.coefs) == (P, K) ||
+            throw(ArgumentError("init coefs has size $(size(θc.coefs)), expected ($P, $K)"))
+        all(isfinite, θc.coefs) || throw(ArgumentError("init coefs must be finite"))
+        θc.coefs .-= θc.coefs[:, 1]          # class 1 is the reference
+    end
+    return _seed_coefs!(θc, ws)
 end
 
-function _as_params(nt::NamedTuple, K, C)
+function _as_params(nt::NamedTuple, ws::LCAWorkspace)
+    K, C = ws.K, ws.C
     (haskey(nt, :class_probs) && haskey(nt, :item_probs)) ||
         throw(ArgumentError("an init NamedTuple must have the fields class_probs and item_probs"))
     cp = Vector{Float64}(nt.class_probs)
     ip = [Matrix{Float64}(P) for P in nt.item_probs]
     _check_init_dims(cp, ip, K, C)
-    return _normalize_init!(LCAParams(cp, ip, nothing))
+    return _seed_coefs!(_normalize_init!(LCAParams(cp, ip, nothing)), ws)
 end
 
-_as_params(x, K, C) = throw(ArgumentError(
+_as_params(x, ::LCAWorkspace) = throw(ArgumentError(
     "init must be nothing, an LCAModel, an LCAParams, a NamedTuple with class_probs and " *
     "item_probs, or a vector of those; got $(typeof(x))"))
 
-_init_list(::Nothing, K, C) = LCAParams[]
-_init_list(xs::AbstractVector, K, C) = LCAParams[_as_params(x, K, C) for x in xs]
-_init_list(x, K, C) = LCAParams[_as_params(x, K, C)]
+_init_list(::Nothing, ::LCAWorkspace) = LCAParams[]
+_init_list(xs::AbstractVector, ws::LCAWorkspace) = LCAParams[_as_params(x, ws) for x in xs]
+_init_list(x, ws::LCAWorkspace) = LCAParams[_as_params(x, ws)]
 
 # ---- multi-start driver -----------------------------------------------------------------
 
@@ -153,20 +188,22 @@ Two-stage multi-start EM (emEM). Seeds for all starts are drawn from `rng` up fr
 every random start uses its own `Xoshiro(seed)`, so serial and threaded runs agree
 bitwise. Stage 1 runs `opts.short_iters` iterations from every start; stage 2 continues
 the `opts.n_final` best to convergence. User-supplied `init` values occupy the first
-start(s). Returns the best parameters, the `StartRecord` of every start, and the index,
-log-likelihood, iteration count, convergence status and replication flag of the winner.
-Internal.
+start(s). With covariates every start carries a coefficient matrix (zero slopes and
+intercepts from its class probabilities unless supplied). Returns the best parameters,
+the `StartRecord` of every start, and the index, log-likelihood, iteration count,
+convergence status and replication flag of the winner. Internal.
 """
 function _multistart(ws::LCAWorkspace, opts::LCAOptions, rng::AbstractRNG, init,
                      multithreaded::Bool)
     K, C = ws.K, ws.C
-    inits = _init_list(init, K, C)
+    inits = _init_list(init, ws)
     n_starts = max(opts.n_starts, length(inits))
     n_final = min(opts.n_final, n_starts)
     seeds = rand(rng, UInt64, n_starts)
     θs = Vector{LCAParams}(undef, n_starts)
     for s in 1:n_starts
-        θs[s] = s <= length(inits) ? inits[s] : _init_random(Xoshiro(seeds[s]), K, C)
+        θs[s] = s <= length(inits) ? inits[s] :
+                _seed_coefs!(_init_random(Xoshiro(seeds[s]), K, C), ws)
     end
 
     # Stage 1: short runs from every start

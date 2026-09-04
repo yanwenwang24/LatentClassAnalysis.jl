@@ -23,17 +23,22 @@ Base.copy(θ::LCAParams) = LCAParams(copy(θ.class_probs), [copy(P) for P in θ.
                                     θ.coefs === nothing ? nothing : copy(θ.coefs))
 
 """
-    LCAWorkspace(d::LCAData, K; aggregate=true, covariates=false, n_categories=d.n_categories)
+    LCAWorkspace(d::LCAData, K; aggregate=true, covariates=false, n_categories=d.n_categories,
+                 standardize=true)
     LCAWorkspace(ws::LCAWorkspace)
 
 Preallocated buffers for EM on `d` with `K` classes. The data are stored transposed
 (`yt` is `J × U`) so inner loops walk contiguous memory. With `aggregate=true` and
 `covariates=false` identical response patterns are collapsed into `U` unique rows with
 weights `freq` and a `row_index` mapping every observation to its pattern; with
-`covariates=true` every row is kept and `Xt` holds the transposed covariate matrix.
-`n_categories` sizes the per-item buffers (a model may have more categories than a
-held-out data set shows). The second form shares the (immutable) data buffers of `ws` and
-allocates fresh scratch buffers, for use by another thread. Internal.
+`covariates=true` every row is kept, `Xt` holds the transposed raw covariate matrix and
+`Xst` the design the E-step and the coefficient M-step work on: the standardized
+covariates of [`_standardize`](@ref) with their back-transform `A` (`β_raw = A * β_std`),
+or the raw design with `A == I` when `standardize=false` (used by `predict`, whose
+coefficients are already on the raw scale). `eta`/`eta2` (`K × U`) cache linear
+predictors. `n_categories` sizes the per-item buffers (a model may have more categories
+than a held-out data set shows). The second form shares the (immutable) data buffers of
+`ws` and allocates fresh scratch buffers, for use by another thread. Internal.
 """
 struct LCAWorkspace
     K::Int
@@ -44,8 +49,11 @@ struct LCAWorkspace
     yt::Matrix{Int}     # J × U codes, 0 = missing
     freq::Vector{Float64}
     row_index::Vector{Int}
-    Xt::Matrix{Float64} # P × U covariates (intercept first); P == 1 when aggregated
+    Xt::Matrix{Float64} # P × U raw covariates (intercept first); 1 × U when aggregated
+    Xst::Matrix{Float64} # P × U design used by the E-step (standardized, or raw; == Xt without covariates)
+    A::Matrix{Float64}  # P × P back-transform of the coefficients, β_raw = A * β_std
     aggregated::Bool
+    covariates::Bool
     # scratch
     post::Matrix{Float64}          # K × U posterior
     logpi::Vector{Float64}         # K
@@ -53,10 +61,13 @@ struct LCAWorkspace
     Nk::Vector{Float64}            # K
     Njkc::Vector{Matrix{Float64}}  # K × C_j
     w::Vector{Float64}             # K
+    eta::Matrix{Float64}           # K × U linear predictors of the current coefficients (K × 0 without covariates)
+    eta2::Matrix{Float64}          # K × U trial linear predictors of the Newton step
 end
 
 function LCAWorkspace(d::LCAData, K::Integer; aggregate::Bool=true, covariates::Bool=false,
-                      n_categories::AbstractVector{<:Integer}=d.n_categories)
+                      n_categories::AbstractVector{<:Integer}=d.n_categories,
+                      standardize::Bool=true)
     n, J = size(d.y)
     length(n_categories) == J ||
         throw(ArgumentError("n_categories has $(length(n_categories)) entries, expected $J"))
@@ -95,21 +106,32 @@ function LCAWorkspace(d::LCAData, K::Integer; aggregate::Bool=true, covariates::
         row_index = collect(1:n)
         Xt = permutedims(d.X)
     end
-    return LCAWorkspace(K, J, U, n, C, yt, freq, row_index, Xt, aggregated,
+    P = size(Xt, 1)
+    if covariates && standardize
+        Xst, A = _standardize(d.X; names=d.covariate_names)
+    else
+        Xst = Xt
+        A = Matrix{Float64}(I, P, P)
+    end
+    n_eta = covariates ? U : 0
+    return LCAWorkspace(K, J, U, n, C, yt, freq, row_index, Xt, Xst, A, aggregated, covariates,
                         Matrix{Float64}(undef, K, U), Vector{Float64}(undef, K),
                         [Matrix{Float64}(undef, K, c) for c in C],
                         Vector{Float64}(undef, K), [zeros(K, c) for c in C],
-                        Vector{Float64}(undef, K))
+                        Vector{Float64}(undef, K),
+                        Matrix{Float64}(undef, K, n_eta), Matrix{Float64}(undef, K, n_eta))
 end
 
 function LCAWorkspace(ws::LCAWorkspace)
     K, U = ws.K, ws.U
-    return LCAWorkspace(K, ws.J, U, ws.n, ws.C, ws.yt, ws.freq, ws.row_index, ws.Xt,
-                        ws.aggregated,
+    n_eta = size(ws.eta, 2)
+    return LCAWorkspace(K, ws.J, U, ws.n, ws.C, ws.yt, ws.freq, ws.row_index, ws.Xt, ws.Xst,
+                        ws.A, ws.aggregated, ws.covariates,
                         Matrix{Float64}(undef, K, U), Vector{Float64}(undef, K),
                         [Matrix{Float64}(undef, K, c) for c in ws.C],
                         Vector{Float64}(undef, K), [zeros(K, c) for c in ws.C],
-                        Vector{Float64}(undef, K))
+                        Vector{Float64}(undef, K),
+                        Matrix{Float64}(undef, K, n_eta), Matrix{Float64}(undef, K, n_eta))
 end
 
 """
@@ -117,13 +139,19 @@ end
 
 E-step: fill `ws.post` with the posterior class probabilities of every (unique) row under
 `θ` and return the observed-data log-likelihood. Missing responses (code 0) are skipped;
-the per-row normalization uses log-sum-exp. Internal.
+the per-row normalization uses log-sum-exp. With coefficients (`θ.coefs !== nothing`) the
+class prior of every row is the multinomial logit of `ws.Xst`, cached in `ws.eta`.
+Internal.
 """
 function estep!(ws::LCAWorkspace, θ::LCAParams)
     K, J, U = ws.K, ws.J, ws.U
     logpi, logB, w, post, yt, freq = ws.logpi, ws.logB, ws.w, ws.post, ws.yt, ws.freq
     hascoefs = θ.coefs !== nothing
-    if !hascoefs
+    if hascoefs
+        ws.covariates || throw(ArgumentError(
+            "the parameters carry covariate coefficients but the workspace was built without covariates"))
+        _eta!(ws.eta, θ.coefs, ws.Xst)
+    else
         @inbounds for k in 1:K
             logpi[k] = log(θ.class_probs[k])
         end
@@ -202,10 +230,11 @@ end
 """
     _update!(θ, ws)
 
-M-step from the accumulated statistics: class probabilities `Nk / ΣNk` (or one damped
-Newton step on the covariate coefficients), item probabilities row-normalized per item
-with a `1e-10` floor; an empty class row (no posterior mass among the observed responses
-of that item) becomes uniform. Internal.
+M-step from the accumulated statistics: class probabilities `Nk / ΣNk` (or, with
+coefficients, one damped Newton step on the covariate coefficients by
+[`_update_coefs!`](@ref), which also sets the class probabilities to the average prior),
+item probabilities row-normalized per item with a `1e-10` floor; an empty class row (no
+posterior mass among the observed responses of that item) becomes uniform. Internal.
 """
 function _update!(θ::LCAParams, ws::LCAWorkspace)
     K = ws.K

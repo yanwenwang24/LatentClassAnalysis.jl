@@ -14,7 +14,10 @@ Research, doi 10.1016/j.alcr.2024.100628).
 - `src/data.jl` `prepare_data` (Tables.jl + DataAPI, no DataFrames dependency).
 - `src/em.jl` `LCAParams` (EM state), `LCAWorkspace` (transposed data, pattern
   aggregation), `estep!`, `_accumulate!`, `_update!`, `_em!`.
-- `src/covariates.jl` hooks for latent class regression (later phase).
+- `src/covariates.jl` latent class regression: `_standardize` (covariates standardized
+  internally, `A` maps coefficients back to the raw scale), the E-step log-prior hook, the
+  damped Newton M-step `_update_coefs!` on `Q(β)`, and `_class_prior` (raw-scale
+  membership probabilities used by `fit`, `predict` and, later, `simulate`).
 - `src/restarts.jl` random starts, two-stage multi-start driver, `_sort_by_size!`,
   `_init_split`.
 - `src/fit.jl` `StatsAPI.fit` methods, `check_identifiability`, fit flags, erroring `fit!`.
@@ -51,8 +54,10 @@ julia --project=examples examples/example_childless.jl
 - `prepare_data` always yields dense codes `1..C_j` per item (`0` = missing), ordered by
   `DataAPI.levels` (level order for categorical columns, sorted values otherwise); the
   labels are stored in `LCAData.item_levels` and `show_profiles`/`profiles` read them.
-- Covariates, standard errors, and the bootstrap are unfinished in 0.3.0: their exported
-  functions exist (docstrings say "not available in this version") and throw.
+- Standard errors and the bootstrap are unfinished in 0.3.0: their exported functions
+  exist (docstrings say "not available in this version") and throw. Covariates are done:
+  `LCAParams.coefs` lives on the standardized scale (column 1 zero), `LCAModel.beta` on
+  the raw scale (`P × (K - 1)`).
 - Every user-visible change gets a line under `[Unreleased]` in `CHANGELOG.md`.
 - Compat entries use caret ranges (`"1.10"` means `>= 1.10, < 2`). Do not add a compat
   entry for `LatentClassAnalysis` in `docs/Project.toml` or `examples/Project.toml`.
